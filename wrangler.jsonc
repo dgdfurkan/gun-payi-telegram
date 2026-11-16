@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gun-payi-telegram",
+  "main": "telegram-worker/worker.mjs",
+  "compatibility_date": "2026-11-16",
+  "workers_dev": true,
+  "vars": {
+    "ALLOWED_ORIGIN": "https://gun-payi.gunduz.chatgpt.site"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HUB",
+        "class_name": "ReminderHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "ReminderHub"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "ratelimits": [
+    {
+      "name": "SETUP_LIMITER",
+      "namespace_id": "164208410",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    }
+  ]
+}

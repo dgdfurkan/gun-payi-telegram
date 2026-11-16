@@ -1,0 +1,17 @@
+{
+  "name": "gun-payi-telegram",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check telegram-worker/worker.mjs && node --check telegram-worker/core.mjs && node --check dist/plan-icons.js",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.163.0"
+  }
+}
