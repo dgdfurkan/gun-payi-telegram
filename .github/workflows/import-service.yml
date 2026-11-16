@@ -1,0 +1,68 @@
+name: Prepare Telegram service
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/import-service.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: prepare-telegram-service
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Import the prepared service
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, io, json, pathlib, urllib.request, zipfile
+          source = 'https://gun-payi.gunduz.chatgpt.site/gun-payi-telegram-service.zip'
+          req = urllib.request.Request(source, headers={'User-Agent': 'Gun-Payi-Repository-Setup'})
+          with urllib.request.urlopen(req, timeout=45) as response:
+              archive = response.read(5 * 1024 * 1024 + 1)
+          if len(archive) > 5 * 1024 * 1024:
+              raise SystemExit('Unexpectedly large service archive')
+          allowed = ['telegram-worker/worker.mjs', 'telegram-worker/core.mjs', 'dist/plan-icons.js', 'wrangler.jsonc']
+          with zipfile.ZipFile(io.BytesIO(archive)) as z:
+              package = json.loads(z.read('package.json'))
+              if package.get('name') != 'gun-payi-telegram-service' or package.get('devDependencies', {}).get('wrangler') != '4.163.0':
+                  raise SystemExit('Unexpected service package')
+              for name in allowed:
+                  content = z.read(name)
+                  if len(content) > 1024 * 1024:
+                      raise SystemExit('Unexpectedly large source file')
+                  path = pathlib.Path(name)
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(content)
+          config = json.loads(pathlib.Path('wrangler.jsonc').read_text())
+          if config.get('name') != 'gun-payi-telegram' or config.get('main') != 'telegram-worker/worker.mjs':
+              raise SystemExit('Unexpected Worker configuration')
+          package = {'name': 'gun-payi-telegram', 'version': '1.0.0', 'private': True, 'type': 'module', 'engines': {'node': '>=22'}, 'scripts': {'test': 'node --test tests/*.test.mjs', 'check': 'node --check telegram-worker/worker.mjs && node --check telegram-worker/core.mjs && node --check dist/plan-icons.js', 'deploy': 'wrangler deploy'}, 'devDependencies': {'wrangler': '4.163.0'}}
+          pathlib.Path('package.json').write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n')
+          pathlib.Path('.gitignore').write_text('node_modules/\n.wrangler/\n.env\n.env.*\n.dev.vars\n.dev.vars.*\n')
+          pathlib.Path('source-provenance.json').write_text(json.dumps({'package_url': source, 'package_sha256': hashlib.sha256(archive).hexdigest(), 'prepared_site_commit': '7c0df888a0805c2787b1982d2ef19ca15c9358d8'}, indent=2) + '\n')
+          PY
+      - name: Install the pinned deployment tools
+        run: npm install --no-audit --no-fund
+      - name: Validate JavaScript
+        run: npm run check
+      - name: Test alarms, identity and bot isolation
+        run: npm test
+      - name: Validate the Cloudflare deployment package
+        run: npx wrangler deploy --dry-run --outdir /tmp/gun-payi-worker-check
+      - name: Commit the verified service
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add telegram-worker/worker.mjs telegram-worker/core.mjs dist/plan-icons.js wrangler.jsonc package.json package-lock.json .gitignore source-provenance.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Prepare Cloudflare Telegram service and two-field connection"
+          git push origin HEAD:main
