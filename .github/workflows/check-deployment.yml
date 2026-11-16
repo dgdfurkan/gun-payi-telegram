@@ -1,0 +1,66 @@
+name: Check deployed Telegram endpoint
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/check-deployment.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-endpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check health, CORS and the agenda connection
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          base = 'https://gun-payi-telegram.frkngndz60.workers.dev'
+          app = 'https://gun-payi.gunduz.chatgpt.site'
+          headers = {'Origin': app, 'User-Agent': 'Gun-Payi-Deployment-Check', 'Cache-Control': 'no-cache'}
+          last = None
+          for attempt in range(4):
+              try:
+                  request = urllib.request.Request(base + '/health', headers=headers)
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      status = response.status
+                      cors = response.headers.get('Access-Control-Allow-Origin')
+                      health = json.load(response)
+                  assert status == 200, 'Health endpoint must return HTTP 200'
+                  assert health.get('service') == 'gun-payi-telegram', 'Unexpected service'
+                  assert health.get('alarm') is True, 'The durable alarm binding is missing'
+                  assert health.get('simpleSetup') is True, 'Two-field setup is unavailable'
+                  assert cors == app, 'The agenda origin is not allowed'
+                  break
+              except Exception as error:
+                  last = error
+                  if attempt == 3:
+                      raise
+                  time.sleep(2)
+          request = urllib.request.Request(base + '/api/configure', method='OPTIONS', headers={**headers, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type'})
+          with urllib.request.urlopen(request, timeout=20) as response:
+              assert response.status == 204, 'Configuration preflight failed'
+              assert response.headers.get('Access-Control-Allow-Origin') == app, 'Configuration CORS origin mismatch'
+              assert 'POST' in response.headers.get('Access-Control-Allow-Methods', ''), 'POST is not allowed'
+          try:
+              with urllib.request.urlopen(urllib.request.Request(base + '/', headers=headers), timeout=20) as response:
+                  root_status = response.status
+          except urllib.error.HTTPError as error:
+              root_status = error.code
+          with urllib.request.urlopen(urllib.request.Request(app + '/telegram-config.json', headers={'Cache-Control': 'no-cache', 'User-Agent': 'Gun-Payi-Deployment-Check'}), timeout=20) as response:
+              config = json.load(response)
+          configured = config.get('serviceUrl', '').rstrip('/') == base
+          print('SERVICE_HEALTH=' + json.dumps(health, ensure_ascii=False, sort_keys=True))
+          print('CORS=passed')
+          print('CONFIGURE_PREFLIGHT=passed')
+          print('ROOT_HTTP_STATUS=' + str(root_status))
+          print('AGENDA_CONNECTED=' + str(configured).lower())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('## Gün Payı Telegram deployment\n\n')
+              summary.write('- Endpoint: ' + base + '\n')
+              summary.write('- Health: passed\n- Native alarm binding: present\n- Two-field setup: supported\n- Agenda CORS: passed\n')
+              summary.write('- Root HTTP status: ' + str(root_status) + '\n')
+              summary.write('- Agenda service URL connected: ' + str(configured).lower() + '\n')
+              summary.write('\nNo bot token, Telegram messages or account credentials were used.\n')
+          PY
