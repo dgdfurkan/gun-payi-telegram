@@ -1,51 +1,58 @@
-# Gün Payı · Telegram hatırlatmaları
+# Gün Payı
 
-Bilgisayara hiçbir şey indirmeden Cloudflare üzerinden kurulabilen bildirim servisi.
+Türkçe, önce cihazda çalışan kişisel ajanda PWA’sı. Planım, Notlar, Gelişim ve Ayarlar; liste/hafta/ay planlayıcı; sesle yazma; pano üzerinden JSON yedekleme; isteğe bağlı Telegram hatırlatmaları ve bot komutları içerir.
 
-## Tarayıcıdan kurulum
+Bu depo **18 Kasım 2026’da ajandanın tam kaynaklarıyla birleştirildi**. Önceden yalnız Telegram sunucusunu içeriyordu. `dist/` derlenmiş framework çıktısı değil, uygulamanın düzenlenebilir HTML/CSS/JS kaynaklarıdır. Kaynaklar, ikonlar, mevcut testler, önceki QA kayıtları ve devir notları birlikte bulunur. Kullanıcının telefondaki kişisel kayıtları bu depoda değildir.
 
-1. Cloudflare hesabında **Workers & Pages → Create application → GitHub** yolunu aç.
-2. **dgdfurkan/gun-payi-telegram** reposunu ve **main** dalını seç.
-3. Ayarları şöyle bırak:
-   - **Worker adı:** `gun-payi-telegram`
-   - **Build command:** boş
-   - **Deploy command:** `npx wrangler deploy`
-   - **Root directory:** repo kökü (varsayılan)
-4. **Save and Deploy** düğmesine bas.
-5. Verilen **https://…workers.dev** adresini Gün Payı'nın bağlantısını hazırlayan kişiye gönder.
+## Devralacak kişi için
 
-Bilgisayarına Node.js, ZIP veya başka bir program kurman gerekmez. Derleme Cloudflare sunucusunda yapılır. Ayrı bir ücretli plan açılmaz; hesabındaki kota ve ücretler geçerlidir.
+1. [Devir notu ve güncel durum](docs/HANDOFF.md)
+2. [Tüm istekler ve öncelik kuralları](docs/PROJECT_REQUIREMENTS.md)
+3. [İlk proje briefi](docs/INITIAL_BRIEF.md)
+4. [Proje sohbetinin kronolojik özeti](docs/CHAT_HISTORY.md)
+5. [Mimari, veri ve yayın yolları](docs/ARCHITECTURE.md)
+6. [Doğrulama geçmişi](QA.md)
 
-**Bu repo tek başına çalışan bir sunucu değildir.** Kendi Cloudflare hesabında Deploy tamamlanmadan ve ajandaya servis adresi bağlanmadan Telegram gönderimi başlamaz.
+## Canlı uygulama
 
-## Telefonda
+| Bileşen | Adres / durum |
+| --- | --- |
+| Ajanda | https://gun-payi.gunduz.chatgpt.site |
+| Telegram API | https://gun-payi-telegram.frkngndz60.workers.dev |
+| Sağlık kontrolü | https://gun-payi-telegram.frkngndz60.workers.dev/health |
+| Ajanda bağlantı dosyası | https://gun-payi.gunduz.chatgpt.site/telegram-config.json |
+| Son ajanda yayını | Sites sürüm 10, arayüz 4.1.1 |
 
-Servis bağlandıktan sonra Gün Payı → Ayarlar → Telegram bölümünde yalnız:
+Sunucu adresi artık ajandada tanımlı. Telefonda Ayarlar → Telegram ve bileklik bölümüne bot tokenı ve sayısal kullanıcı ID’si girilir. ID için kendi botunda **Başlat**, ardından ajandada **ID’mi bul** kullanılabilir. Telefona servis, terminal veya Cloudflare aracı kurmak gerekmez. Gerçek bot bağlantısı, kapalı PWA’da zamanlı teslim ve Mi Band 6 teslimi henüz bizim tarafımızdan doğrulanmadı.
 
-- **Bot tokenı**
-- **Telegram kullanıcı ID**
+## Çalıştırma ve test
 
-alanları vardır. Kendi botuna Telegram'da **Başlat** dedikten sonra **ID’mi bul** ID'ni alabilir. Birden fazla kişi bulunursa kendi hesabını seç.
+Node 22 kullanılır. Otomatik testler Node’un yerleşik test koşucusunu kullanır:
 
-Bot tokenını veya Cloudflare anahtarlarını GitHub'a yazma. Telefon bağlantısı kendi botunu doğrular ve tokenı yalnız kendi Cloudflare sunucunda saklar. Telefona ayrıca servis adresi ya da kurulum anahtarı girilmez.
+```sh
+npm test
+npm run check
+```
 
-Önce deneme mesajını, ardından **1 dk. sonra dene** düğmesiyle uygulama kapalıyken teslimi kontrol et. Gerçek Telegram/Mi Band teslimi ayrıca test edilmelidir.
+Toplam **93** test: `npm run test:web` ajandanın 85, `npm run test:service` sunucunun 8 kontrolünü çalıştırır. Ses testleri sentetiktir; gerçek mikrofon ve işletim sistemi bildirim testlerinin yerine geçmez.
 
-## Desteklenen işlemler
+Statik önizleme için `dist/` HTTP ile servis edilir:
 
-`/ekle yarın 09:00 Spor`, `/not Aklımdaki fikir`, `/bugun`, `/yarin`, `/hafta`, `/tamam 1` ve hatırlatmadaki **Tamamlandı** düğmesi.
+```sh
+python3 -m http.server 8000 --directory dist
+```
 
-Düz mesaj not olur. Telegram'dan gelen değişiklikler ajanda açılınca alınır. Serbest AI sohbeti ve ses mesajı çözümleme bağlı değildir.
+`file://` kullanmayın. `localhost` geliştirme istisnasıdır; üretimde mikrofon/PWA için HTTPS gerekir. Yerel önizleme telefon verilerini içermez. Üretim Telegram sunucusu CORS nedeniyle yalnız mevcut ajanda origin’ini kabul eder; localhost için ayrı geliştirme servisi gerekir.
 
-## Teknik notlar
+## İki ayrı yayın hedefi
 
-- Her doğrulanmış bot ayrı SQLite Durable Object alanında tutulur; native alarm PWA'dan bağımsız çalışır.
-- Webhook sırrı, özel sohbet ve kullanıcı ID kontrolü birlikte uygulanır.
-- Başka servisin webhook'u değiştirilmez.
-- Kurulum uçları yaklaşık 20 deneme/dakika IP limitiyle korunur.
-- Planların hatırlatma kopyası sunucuda tutulur; notlar topluca aktarılmaz.
-- Cihaz erişim anahtarı yenilenebilir, token durum yanıtlarına yazılmaz.
-- Mesaj teslimi ağ, Telegram ve telefon/bileklik ayarlarına bağlıdır; tam saniye garantisi yoktur.
-- Mi Band'a Telegram telefon bildirimleri üzerinden ulaşılır.
+- **Telegram sunucusu:** Bu depoya bağlı Cloudflare Workers dağıtımı. Kök `wrangler.jsonc`, `telegram-worker/worker.mjs` dosyasını yayımlar. `npm ci` ardından `npx wrangler deploy --dry-run` paket kontrolüdür; `npm run deploy` gerçek sunucuyu değiştirir. Mevcut GitHub–Cloudflare bağlantısı push sonrası sunucuyu dağıtır.
+- **Ajanda arayüzü:** Şu anda ChatGPT Sites üzerinde, `.openai/hosting.json` içindeki mevcut projede yayımlanır. Bu depoya push, `gun-payi.gunduz.chatgpt.site` arayüzünü kendiliğinden değiştirmez. Sonraki ajan mevcut Site kaynağını resmi Sites akışıyla açmalı, arayüz değişikliklerini oraya da uygulamalı ve aynı projeyi yayımlamalıdır.
 
-Kontroller Node.js testleri, sözdizimi doğrulaması ve Cloudflare paketleme denemesini içerir. Testler gerçek Telegram yerine sahte yanıtlar kullanır.
+Kök Worker’a gelişigüzel `assets` eklemeyin. Arayüz origin’ini değiştirmek mevcut IndexedDB kayıtlarını yeni adreste görünmez hâle getirir. Başka platforma taşınacaksa önce pano yedeği ve geri yükleme planı hazırlanmalıdır.
+
+Ana kayıtlar cihazdaki IndexedDB’dedir. Yedek; isim, tercihler, planlar/tekrar istisnaları, notlar, hedefler, gün kayıtları, değerlendirmeler ve desteklenen taslakları içerir. Bot tokenı ve cihaz bağlantı anahtarı yedeğe girmez. Yedek şifreli kasa veya otomatik bulut eşitlemesi değildir.
+
+Tarayıcı sistem bildirimleri yalnız uygulama açıkken kontrol edilir. Kapalı PWA için Web Push kurulmuş değildir; mevcut yol Cloudflare alarmı → Telegram’dır. Mi Band yansıtması telefon/bileklik ayarlarına bağlıdır.
+
+Eski kurulum anlatımı [burada](docs/TELEGRAM_BROWSER_SETUP.md), ajandanın önceki sürüm notları [burada](docs/SITE_README_HISTORY.md) korunur. Bu tarihsel dosyalardaki “sunucu henüz bağlanmadı” gibi ifadeler için güncel devir notu esas alınır.

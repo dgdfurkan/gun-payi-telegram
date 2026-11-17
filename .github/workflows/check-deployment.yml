@@ -2,7 +2,7 @@ name: Check deployed Telegram endpoint
 on:
   push:
     branches: [main]
-    paths: [".github/workflows/check-deployment.yml"]
+    paths: [".github/workflows/check-deployment.yml", "dist/telegram-config.json"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -51,6 +51,7 @@ jobs:
           with urllib.request.urlopen(urllib.request.Request(app + '/telegram-config.json', headers={'Cache-Control': 'no-cache', 'User-Agent': 'Gun-Payi-Deployment-Check'}), timeout=20) as response:
               config = json.load(response)
           configured = config.get('serviceUrl', '').rstrip('/') == base
+          assert configured, 'The deployed agenda is not connected to the Telegram service'
           print('SERVICE_HEALTH=' + json.dumps(health, ensure_ascii=False, sort_keys=True))
           print('CORS=passed')
           print('CONFIGURE_PREFLIGHT=passed')

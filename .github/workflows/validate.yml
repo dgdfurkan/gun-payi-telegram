@@ -1,4 +1,4 @@
-name: Validate Telegram service
+name: Validate full Gun Payi project
 on:
   push:
     branches: [main]
@@ -23,7 +23,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Validate JavaScript
         run: npm run check
-      - name: Test alarms and Telegram access
+      - name: Test agenda, backups, voice, updates and Telegram alarms
         run: npm test
       - name: Check Cloudflare bundle and bindings
         run: npx wrangler deploy --dry-run --outdir /tmp/gun-payi-worker-check
