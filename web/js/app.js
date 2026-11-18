@@ -4,7 +4,7 @@ import * as api from './api.js';
 import { ctx, today } from './ctx.js';
 import { icon } from './icons.js';
 import { $, $$, esc, haptic, applyTheme, reduced } from './ui.js';
-import { renderPlan, planActs, bindSwipe } from './plan.js';
+import { renderPlan, planActs, bindSwipe, closeOpenRow } from './plan.js';
 import { openCompose, openItem } from './compose.js';
 import { renderNotes, renderReview, renderSettings, pageActs, onInput, onChange, prepareLink, linkState, watchLink, checkLinkNow, refreshStatus } from './pages.js';
 
@@ -70,8 +70,7 @@ document.addEventListener('click', e => {
   }
   if (act === 'open') {
     if (Date.now() - (ctx.swipedAt || 0) < 450) return;
-    const open = t.closest('.swipe.open');
-    if (open) { open.classList.remove('open'); return; }
+    if (t.closest('.swipe.open, .swipe.open-l')) { closeOpenRow(); return; }
     haptic(); openItem(t.dataset.id, t.dataset.origin); return;
   }
   (planActs[act] || pageActs[act] || welcomeActs[act])?.(t, e);

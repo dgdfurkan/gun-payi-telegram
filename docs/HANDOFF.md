@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **18 Kasım 2026**. Sürüm **5.3.0**.
+Güncelleme: **18 Kasım 2026**. Sürüm **5.4.0**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,13 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.4
+
+- **Kaydırma iOS tarzı:** kart kayınca yanında ayrı, yuvarlak köşeli düğme açılır (sola: kırmızı Sil, sağa: Tamamla). Dokunmak ya da sonuna kadar çekmek işlemi yapar; tamamlanan silinmez, üstü çizilir.
+- **Tamamlananlar:** `prefs.showDone` (varsayılan gizli), Plan üst çubuğunda göz düğmesi. Gizliyken listelerden, sayılardan, gün şeridi ve ay noktalarından çıkar (`visibleOn`).
+- Sayı etiketleri büyük harfle ("2 Plan", "Bu Ay 7 Plan"); "Telegram bağlı" rozeti kaldırıldı.
+- **Profil fotoğrafı** (`web/js/avatar.js`): seç, daire içinde kaydır/yakınlaştır, çerçeve (Yok, Altın, Gümüş, Rose gold, Tema, Neon). `localStorage['gp-avatar']` (360 px JPEG, yaklaşık 10-30 KB); yedeğe girmez. Üst çubukta ve Ayarlar'da görünür.
 
 ## 5.3
 

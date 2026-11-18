@@ -6,6 +6,7 @@ import { $, esc, haptic, toast, sheet, confirmDanger, copyText, actions, applyTh
 import { ctx, today } from './ctx.js';
 import * as api from './api.js';
 import { appbar, hero } from './chrome.js';
+import { avatarHTML, openAvatarSheet } from './avatar.js';
 import { catOf } from './categories.js';
 import { tile } from './pickers.js';
 import { VERSION } from './version.js';
@@ -28,7 +29,7 @@ export function renderNotes() {
     return `<button type="button" class="note" data-act="note" data-id="${esc(n.id)}"><b>${esc(first)}</b><span><time>${fmt(n.updatedAt || n.createdAt)}</time>${esc(rest.join(' ').trim() || '')}</span></button>`;
   }).join('')}</div>`;
   return `${appbar('Notlar')}<div class="page">
-    ${hero('Aklındakiler', notes.length ? `${notes.length} not` : 'Boş defter')}
+    ${hero('Aklındakiler', notes.length ? `${notes.length} Not` : 'Boş Defter')}
     ${notes.length ? `<label class="search">${searchIcon}<input type="search" placeholder="Notlarda ara" value="${esc(ctx.noteQuery)}" data-input="note-q" enterkeyhint="search"></label>` : ''}
     ${body}</div>`;
 }
@@ -58,14 +59,14 @@ export function renderReview() {
   return `${appbar('Özet')}<div class="page">
     ${hero('Bu hafta', range)}
     <div class="stats">
-      <div class="stat"><b>${done}<small> / ${total}</small></b><span>Tamamlanan plan</span><div class="track"><i style="width:${pct}%"></i></div></div>
-      <div class="stat"><b>${upcoming}</b><span>Gelecek hafta plan${inbox ? ` · ${inbox} yapılacak` : ''}</span></div>
+      <div class="stat"><b>${done}<small> / ${total}</small></b><span>Tamamlanan Plan</span><div class="track"><i style="width:${pct}%"></i></div></div>
+      <div class="stat"><b>${upcoming}</b><span>Gelecek Hafta Plan${inbox ? ` · ${inbox} Yapılacak` : ''}</span></div>
     </div>
-    ${open.length ? `<div class="sec-h"><h3>Açık kalanlar</h3><span>${open.length}</span></div><div class="tasks">${open.slice(0, 12).map(o => `<div class="task" data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">
+    ${open.length ? `<div class="sec-h"><h3>Açık Kalanlar</h3><span>${open.length}</span></div><div class="tasks">${open.slice(0, 12).map(o => `<div class="task" data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">
         ${tile(catOf(o))}<div class="task-main"><div class="task-title">${esc(o.title)}</div><div class="tags"><span class="tag">${icon('cal')}${esc(dayLabel(o.date, t))}${o.time ? ' ' + o.time : ''}</span></div></div>
         <div class="mini-actions"><button type="button" data-act="carry" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">Bugüne</button><button type="button" data-act="toggle" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}" aria-label="Tamamla">${icon('check')}</button></div></div>`).join('')}</div>
       <p class="section-f">Bitmeyenler kendiliğinden taşınmaz; istersen bugüne al.</p>` : ''}
-    <div class="sec-h"><h3>Haftalık değerlendirme</h3></div>
+    <div class="sec-h"><h3>Haftalık Değerlendirme</h3></div>
     <div class="group">${QUESTIONS.map((q, i) => `<div class="q"><label for="q${i}">${esc(q)}</label><textarea id="q${i}" rows="1" data-q="${i}" placeholder="Kısa bir not…">${esc(review.answers[i] || '')}</textarea></div>`).join('')}</div>
     <p class="section-f">Cevaplar yalnız bu cihazda saklanır.</p>
     ${past.length ? `<div class="section-h">Önceki haftalar</div><div class="group">${past.map(r => `<button type="button" class="cell" data-act="past-review" data-week="${r.week}"><span class="cell-label">${+r.week.slice(8)} ${MONTHS[+r.week.slice(5, 7) - 1]} haftası<small>${esc((r.answers.find(a => a?.trim()) || '').slice(0, 60))}</small></span>${icon('chevR', 'chev')}</button>`).join('')}</div>` : ''}
@@ -100,7 +101,7 @@ export function renderSettings() {
   const rem = s.prefs.reminderDefaults;
   const modeIdx = Math.max(0, MODE_LIST.findIndex(([k]) => k === s.prefs.mode));
   return `${appbar('Ayarlar')}<div class="page">
-    <div class="group"><div class="profile"><div class="avatar">${esc(initial)}</div><label style="flex:1;min-width:0"><input type="text" value="${esc(s.prefs.name)}" placeholder="Adın" data-input="name" enterkeyhint="done" autocomplete="given-name"><small>Selamlamada ve sabah özetinde</small></label></div></div>
+    <div class="group"><div class="profile"><button type="button" class="profile-av" data-act="avatar" aria-label="Profil fotoğrafı">${avatarHTML('lg')}<span class="cam">${icon('camera')}</span></button><label style="flex:1;min-width:0"><input type="text" value="${esc(s.prefs.name)}" placeholder="Adın" data-input="name" enterkeyhint="done" autocomplete="given-name"><small>Fotoğrafa dokun: resim ve çerçeve seç</small></label></div></div>
     <div class="section-h">Görünüm</div>
     <div class="group">
       <div class="look"><span>Renk</span><div class="dots-pick">${COLOR_DOTS.map(([k, label, p, pc]) => `<button type="button" class="dot-c ${s.prefs.color === k ? 'on' : ''}" data-act="color" data-c="${k}" style="--dp:${p};--dc:${pc}" aria-label="${label}"></button>`).join('')}</div></div>
@@ -271,6 +272,7 @@ export const pageActs = {
     api.sync();
   },
   widget: () => widgetSheet(),
+  avatar: () => { haptic(); openAvatarSheet(() => ctx.render()); },
   color: el => {
     const c = el.dataset.c;
     haptic();

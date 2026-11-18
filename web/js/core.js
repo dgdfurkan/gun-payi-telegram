@@ -263,6 +263,7 @@ export function cleanPrefs(raw = {}) {
     plannerMode: ['day', 'week', 'month'].includes(raw.plannerMode) ? raw.plannerMode : 'day',
     digest: { on: Boolean(raw.digest?.on), time: isTime(raw.digest?.time) ? raw.digest.time : '08:00' },
     reviewDay: Number.isInteger(raw.reviewDay) && raw.reviewDay >= 0 && raw.reviewDay <= 6 ? raw.reviewDay : 0,
+    showDone: raw.showDone === true,
     color: COLORS.includes(raw.color) ? raw.color : (LEGACY[raw.theme]?.[0] || 'yesil'),
     mode: MODES.includes(raw.mode) ? raw.mode : (LEGACY[raw.theme]?.[1] || 'light'),
   };
