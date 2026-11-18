@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, cleanTitle } from '../web/js/parse.js';
+import { parse, cleanTitle, parseDurations, parseClock } from '../web/js/parse.js';
 
 // 18 Kasım 2026 Çarşamba, İstanbul 10:00
 const now = Date.parse('2026-11-18T07:00:00Z');
@@ -69,4 +69,29 @@ test('başlık temizliği fiil kalıbını sadeleştirir', () => {
   assert.equal(cleanTitle('babaannemi aramam için gerekli olan şeyi ekle'), 'Babaannemi ara');
   assert.equal(cleanTitle('faturayı ödemeyi unutma'), 'Faturayı öde');
   assert.equal(cleanTitle('çöpü çıkar'), 'Çöpü çıkar');
+});
+
+test('yazılan süreler hatırlatma listesine çevrilir', () => {
+  assert.deepEqual(parseDurations('30 dk'), [30]);
+  assert.deepEqual(parseDurations('1 sa 15 dk'), [75]);
+  assert.deepEqual(parseDurations('1 saat 15 dakika'), [75]);
+  assert.deepEqual(parseDurations('10 ve 15 dk'), [15, 10]);
+  assert.deepEqual(parseDurations('10, 15, 30 dk'), [30, 15, 10]);
+  assert.deepEqual(parseDurations('yarım saat'), [30]);
+  assert.deepEqual(parseDurations('15 sn'), [0.25]);
+  assert.deepEqual(parseDurations('1,5 saat'), [90]);
+  assert.deepEqual(parseDurations('vaktinde ve 10 dk'), [10, 0]);
+  assert.deepEqual(parseDurations('on beş dakika'), [15]);
+  assert.deepEqual(parseDurations('yok'), []);
+  assert.equal(parseDurations('abc'), null);
+});
+
+test('yazılan saat esnek okunur', () => {
+  assert.equal(parseClock('17:34'), '17:34');
+  assert.equal(parseClock('17 34'), '17:34');
+  assert.equal(parseClock('1734'), '17:34');
+  assert.equal(parseClock('930'), '09:30');
+  assert.equal(parseClock('17'), '17:00');
+  assert.equal(parseClock('akşam 8', { now, tz: 'Europe/Istanbul' }), '20:00');
+  assert.equal(parseClock('xyz'), '');
 });

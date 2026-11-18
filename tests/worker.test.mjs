@@ -153,6 +153,47 @@ test('taslak düğmelerle ve yazarak düzeltilir', async () => {
   assert.match(lastSent(t).body.text, /✖️/);
 });
 
+test('taslakta menüye girince yazılan metin o alana uygulanır', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  await t.hook(message('Spor'));
+  await press(t, btn(lastSent(t), 'Yazı'));
+  assert.match(lastSent(t).body.text, /Yeni başlığı/);
+  await t.hook(message('akşam koşusu'));
+  assert.match(lastSent(t).body.text, /<b>Akşam koşusu<\/b>/);
+  await press(t, btn(lastSent(t), 'Saat'));
+  await t.hook(message('1734'));
+  assert.match(lastSent(t).body.text, /🕐 17:34/);
+  await press(t, btn(lastSent(t), 'Hatırlat'));
+  await t.hook(message('1 sa 15 dk'));
+  assert.match(lastSent(t).body.text, /1 sa 15 dk önce/);
+  await press(t, btn(lastSent(t), 'Hatırlat'));
+  await t.hook(message('saçma'));
+  assert.match(lastSent(t).body.text, /Süreyi anlayamadım/);
+  await t.hook(message('10 ve 30 dk'));
+  assert.match(lastSent(t).body.text, /10, 30 dk önce/);
+  await press(t, btn(lastSent(t), 'Gün'));
+  await t.hook(message('20 Aralık 2027'));
+  assert.match(lastSent(t).body.text, /20 Aralık/);
+  await press(t, btn(lastSent(t), 'Ekle'));
+  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const it = sync.events[0].item;
+  assert.equal(it.title, 'Akşam koşusu');
+  assert.equal(it.date, '2027-12-20');
+  assert.equal(it.time, '17:34');
+  assert.deepEqual(it.reminders, [30, 10]);
+});
+
+test('gün menüsünde "haftaya cuma" yazılabilir', async () => {
+  const t = setup();
+  await linked(t);
+  await t.hook(message('Toplantı'));
+  await press(t, btn(lastSent(t), 'Gün'));
+  await t.hook(message('haftaya cuma'));
+  assert.match(lastSent(t).body.text, /📅/);
+  assert.doesNotMatch(lastSent(t).body.text, /anlayamadım/);
+});
+
 test('saatsiz metin yapılacaklara düşer, not komutu not olur', async () => {
   const t = setup();
   const auth = await linked(t);

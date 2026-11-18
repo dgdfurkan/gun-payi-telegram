@@ -190,6 +190,30 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .task.enter { animation: rowIn .55s var(--spring); }
 @keyframes rowIn { from { opacity: 0; transform: translateY(-12px) scale(.97); } }
 
+/* ---------- Kaydırma (sola sil, sağa tamamla) ---------- */
+.swipe { position: relative; border-radius: 18px; }
+.swipe-bg { position: absolute; inset: 0; border-radius: 18px; display: flex; align-items: stretch; overflow: hidden; opacity: 0; transition: opacity .15s; }
+.swipe.left .swipe-bg, .swipe.open .swipe-bg { opacity: 1; background: var(--red); }
+.swipe.right .swipe-bg { opacity: 1; background: var(--green); }
+.swipe.is-done.right .swipe-bg { background: var(--orange); }
+.sb-l, .sb-r { display: flex; align-items: center; gap: 7px; padding: 0 22px; color: #fff; font-size: 13px; font-weight: 800; opacity: 0; transition: opacity .15s; }
+.sb-l .i, .sb-r .i { width: 20px; height: 20px; stroke-width: 2.4; transition: transform .25s var(--spring); }
+.sb-r { margin-left: auto; justify-content: flex-end; min-width: 96px; transition: opacity .15s, min-width .25s var(--ease); }
+.swipe.right .sb-l { opacity: 1; }
+.swipe.left .sb-r, .swipe.open .sb-r { opacity: 1; }
+.swipe.arm .sb-l .i, .swipe.full .sb-r .i { transform: scale(1.3); }
+.swipe.full .sb-r { min-width: 100%; }
+.swipe .task { touch-action: pan-y; transition: transform .42s var(--spring); will-change: transform; }
+.swipe.dragging .task { transition: none; }
+.swipe.open .task { transform: translateX(-96px); }
+.swipe-hint { margin: -10px 4px 0; font-size: 11px; font-weight: 600; color: var(--label-3); }
+.done-toggle { align-self: center; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 17px; background: var(--s); color: var(--label-2); font-size: 12px; font-weight: 700; }
+.done-toggle .i { width: 15px; height: 15px; stroke-width: 2.6; color: var(--green); }
+.all-done { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 22px 16px; border-radius: 20px; background: var(--card); box-shadow: var(--card-shadow); text-align: center; }
+.all-done .i { width: 38px; height: 38px; padding: 8px; border-radius: 50%; background: var(--grad); color: #fff; stroke-width: 2.8; margin-bottom: 6px; box-shadow: var(--glow); }
+.all-done b { font-size: 16px; font-weight: 800; }
+.all-done span { font-size: 13px; color: var(--label-2); }
+
 /* ---------- Boş gün ---------- */
 .empty-hero { position: relative; overflow: hidden; padding: 30px 22px 26px; border-radius: 22px; background: var(--card); box-shadow: var(--card-shadow); text-align: center; }
 .empty-hero .aura { position: absolute; width: 180px; height: 180px; border-radius: 50%; filter: blur(40px); pointer-events: none; }

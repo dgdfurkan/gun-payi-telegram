@@ -68,7 +68,12 @@ document.addEventListener('click', e => {
     openCompose({ day, text: t.dataset.text || '', kind: ctx.tab === 'notes' ? 'note' : 'plan' });
     return;
   }
-  if (act === 'open') { haptic(); openItem(t.dataset.id, t.dataset.origin); return; }
+  if (act === 'open') {
+    if (Date.now() - (ctx.swipedAt || 0) < 450) return;
+    const open = t.closest('.swipe.open');
+    if (open) { open.classList.remove('open'); return; }
+    haptic(); openItem(t.dataset.id, t.dataset.origin); return;
+  }
   (planActs[act] || pageActs[act] || welcomeActs[act])?.(t, e);
 });
 document.addEventListener('input', e => { if (!e.target.closest('.sheet-root') && (e.target.dataset.input !== undefined || e.target.dataset.q !== undefined)) onInput(e.target); });

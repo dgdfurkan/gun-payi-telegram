@@ -335,3 +335,50 @@ export function toItem(p, extra = {}) {
   };
 }
 export const parseDay = (now, tz) => dayAt(now, tz);
+
+// Yalnız süre yazıldığında hatırlatma listesi: "30 dk", "1 sa 15 dk" (75), "10 ve 15 dk", "yarım saat",
+// "15 sn", "vaktinde ve 10 dk". Anlaşılmazsa null, "yok" için [].
+const DUR_UNIT = { saniye: 1 / 60, sn: 1 / 60, dakika: 1, dakka: 1, dk: 1, dak: 1, d: 1, saat: 60, sa: 60, s: 60, gün: 1440, g: 1440 };
+export function parseDurations(input) {
+  let s = String(input || '').toLocaleLowerCase('tr').replace(/[’'`]/g, ' ').replace(/(önce\p{L}*|kala|hatırlat\p{L}*|kadar)/gu, ' ').trim();
+  if (!s) return null;
+  if (/^(yok|hiç|kapat|hatırlatma yok|istemiyorum)$/u.test(s)) return [];
+  const out = new Set();
+  if (/(vaktinde|zamanında|tam saatinde|anında)/u.test(s)) { out.add(0); s = s.replace(/(tam\s+)?(vaktinde|zamanında|saatinde|anında)/gu, ' '); }
+  s = s.replace(/(\d),(\d)(?!\d)/g, '$1.$2'); // "1,5 saat" ondalık, "10,15 dk" liste
+  const groups = s.split(/\s*(?:,|;|\+|(?<![\p{L}])(?:ve|veya|ile|ya da)(?![\p{L}]))\s*/u).map(g => g.trim()).filter(Boolean);
+  const tok = new RegExp(`(\\d+(?:[.,]\\d+)?|yarım|çeyrek|${NUMW})\\s*(saniye|sn|dakika|dakka|dk|dak|saat|sa|gün|g|s|d)?(?![\\p{L}])`, 'gu');
+  const parsed = groups.map(g => {
+    const parts = [...g.matchAll(tok)].map(m => ({ n: m[1] === 'çeyrek' ? 0.25 : /\d/.test(m[1]) ? parseFloat(m[1].replace(',', '.')) : wordNum(m[1]), u: m[2] || '' }));
+    const rest = g.replace(tok, '').replace(/[\s.]/g, '');
+    return rest ? null : parts;
+  });
+  if (parsed.some(p => p === null)) return out.size ? [...out] : null;
+  for (let i = 0; i < parsed.length; i++) {
+    const parts = parsed[i];
+    if (!parts.length) continue;
+    let unit = parts.find(p => p.u)?.u;
+    if (!unit) unit = parsed.slice(i + 1).flat().find(p => p.u)?.u || 'dk'; // "10 ve 15 dk"
+    let total = 0;
+    for (const p of parts) {
+      if (!Number.isFinite(p.n)) return null;
+      const u = DUR_UNIT[p.u || (parts.length > 1 && p !== parts[0] ? 'dk' : unit)];
+      total += (p.n === 0.5 && !p.u && unit === 'dk' ? 30 : p.n * u);
+    }
+    const v = Math.round(total * 60) / 60;
+    if (v < 0 || v > 40320) return null;
+    out.add(v);
+  }
+  return out.size ? [...out].sort((a, b) => b - a) : null;
+}
+
+// Yalnız saat yazıldığında: "17:34", "17.34", "17 34", "1734", "17", "saat 5", "akşam 8".
+export function parseClock(input, opts = {}) {
+  const s = String(input || '').trim().toLocaleLowerCase('tr');
+  let m = s.match(/^(\d{1,2})\s*[:.,\s]\s*(\d{2})$/) || s.match(/^(\d{2})(\d{2})$/) || s.match(/^(\d)(\d{2})$/);
+  if (m && +m[1] < 24 && +m[2] < 60) return `${pad(+m[1])}:${pad(+m[2])}`;
+  m = s.match(/^(\d{1,2})$/);
+  if (m && +m[1] < 24) return `${pad(+m[1])}:00`;
+  const r = parse(s, opts);
+  return r.found?.time ? r.time : '';
+}

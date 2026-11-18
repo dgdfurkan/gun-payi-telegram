@@ -1,6 +1,6 @@
 // Ekleme (doğal dil + ses), plan düzenleme ve not sayfaları.
 import { parse, toItem } from './parse.js';
-import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, summary, weekday, uid, occurrence, patchOccurrence, shortDate, DAY_NAMES } from './core.js';
+import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, summary, weekday, uid, occurrence, patchOccurrence, shortDate, statusOf, DAY_NAMES } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
 import { $, $$, esc, haptic, toast, sheet, actions, confirmDanger } from './ui.js';
@@ -223,6 +223,7 @@ export function openItem(id, origin) {
   const t = today();
   let open = '', month = (d.date || t).slice(0, 7);
   const remSel = () => d.reminders ?? get().prefs.reminderDefaults;
+  const isDone = statusOf(base, origin || base.date) === 'done';
   const row = (key, ic, label, value, cls = '') => `<button type="button" class="cell ${open === key ? 'opened' : ''} ${cls}" data-x="${key}"><span class="cell-ic soft">${icon(ic)}</span><span class="cell-label">${label}</span><span class="cell-value">${value}</span>${icon('chevD', 'chev rot')}</button>`;
   const body = () => `<div class="form">
     <div class="ed-head"><button type="button" class="pv-ico big" data-x="icon" aria-label="İkon seç">${tile(catOf(d), 'lg')}</button>
@@ -240,6 +241,7 @@ export function openItem(id, origin) {
       ${open === 'rep' ? `<div class="exp in">${repeatHTML(d)}</div>` : ''}</div>` : ''}
     ${d.time ? `<div class="section-h">Telegram hatırlatması</div><div class="group pad">${reminderHTML(remSel())}</div>` : ''}
     <div class="section-h">Not</div><div class="group"><textarea class="note-input" data-f="note" placeholder="Ayrıntı ekle" rows="3">${esc(d.note || '')}</textarea></div>
+    <div class="group"><button type="button" class="cell" data-x="done"><span class="cell-ic green">${icon(isDone ? 'undo' : 'check')}</span><span class="cell-label">${isDone ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı'}${occ ? `<small>Sadece ${esc(dayLabel(occ.date, t))}</small>` : ''}</span></button></div>
     ${occ ? `<div class="section-h">Sadece ${esc(dayLabel(occ.date, t))}</div><div class="group">
       <button type="button" class="cell" data-x="skip"><span class="cell-ic gray">${icon('skip')}</span><span class="cell-label">Bu günü atla</span></button>
       <button type="button" class="cell" data-x="tomorrow"><span class="cell-ic orange">${icon('move')}</span><span class="cell-label">Bu günü yarına taşı</span></button></div>` : ''}
@@ -279,6 +281,14 @@ export function openItem(id, origin) {
     if (b.dataset.rc || b.dataset.unit) { const v = handleCustom(b); if (v !== null && !remSel().includes(v)) { d.reminders = [...remSel(), v]; haptic('success'); rerender(); } return; }
     if (x === 'notime') { d.time = ''; d.endTime = ''; open = ''; return rerender(); }
     if (x === 'noend') { d.endTime = ''; open = ''; return rerender(); }
+    if (x === 'done') {
+      const next = isDone ? 'pending' : 'done';
+      await commit(s => {
+        const i = s.items.findIndex(z => z.id === id);
+        s.items[i] = base.date ? patchOccurrence(s.items[i], origin || base.date, { status: next }) : { ...s.items[i], status: next, updatedAt: new Date().toISOString() };
+      });
+      haptic('success'); sh.close(); toast(next === 'done' ? 'Tamamlandı' : 'Geri alındı'); sync(); return;
+    }
     if (x === 'skip' || x === 'tomorrow') {
       const patch = x === 'skip' ? { status: 'cancelled' } : { date: dayAdd(occ.date, 1) };
       await commit(s => { const i = s.items.findIndex(z => z.id === id); s.items[i] = patchOccurrence(s.items[i], origin, patch); });

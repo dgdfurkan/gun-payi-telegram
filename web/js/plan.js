@@ -2,7 +2,7 @@
 import { itemsOn, dayAdd, weekday, mondayOf, monthDays, daysBetween, dayLabel, repeatLabel, remindersLabel, statusOf, patchOccurrence, toMin, clockAt, DAY_SHORT, DAY_NAMES, MONTHS, pad } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
-import { esc, haptic, toast } from './ui.js';
+import { esc, haptic, toast, actions, reduced } from './ui.js';
 import { ctx, today, tz } from './ctx.js';
 import { sync } from './api.js';
 import { catOf, CATS } from './categories.js';
@@ -39,12 +39,14 @@ export function itemRow(o, t, { stripe = false } = {}) {
   if (ctx.enter === o.id) cls += ' enter';
   if (stripe) cls += ' stripe';
   const color = CATS[key]?.color;
-  return `<div class="task ${cls}" ${color ? `style="--c:${color}"` : ''} data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}">
-    <button type="button" class="check" data-act="toggle" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}" aria-label="${done ? 'Geri al' : 'Tamamla'}">${icon('check')}</button>
+  const ids = `data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}"`;
+  return `<div class="swipe ${done ? 'is-done' : ''}" ${ids}>
+    <div class="swipe-bg"><span class="sb-l">${icon(done ? 'undo' : 'check')}${done ? 'Geri al' : 'Tamamla'}</span><button type="button" class="sb-r" data-act="swipe-del" ${ids}>${icon('trash')}Sil</button></div>
+    <div class="task ${cls}" ${color ? `style="--c:${color}"` : ''} data-act="open" ${ids}>
     ${tile(key)}
     <div class="task-main"><div class="task-title">${esc(o.title)}</div>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
     ${o.time ? `<span class="time-pill">${o.time}${o.endTime ? `<small>${o.endTime}</small>` : ''}</span>` : ''}
-  </div>`;
+  </div></div>`;
 }
 
 function strip(sel, t) {
@@ -70,6 +72,13 @@ function emptyDay(day, t) {
     <div class="starters"><span class="kicker">Hızlı başla</span><div class="chips-row">${STARTERS.map(([l, g, txt]) => `<button type="button" class="starter" data-act="add" data-text="${esc(txt)}">${icon(g)}${l}</button>`).join('')}</div></div>`;
 }
 
+// Tamamlananlar listeden düşer; istenirse küçük bağlantıyla görünür (geri almak için).
+const doneToggle = n => `<button type="button" class="done-toggle" data-act="show-done">${icon('check')}${n} tamamlandı · ${ctx.showDone ? 'gizle' : 'göster'}</button>`;
+function swipeHint() {
+  try { if (localStorage.getItem('gp-swiped')) return ''; } catch { return ''; }
+  return '<p class="swipe-hint">Sağa kaydır: tamamla · Sola kaydır: sil</p>';
+}
+
 function dayBody(day, t) {
   const s = get();
   const list = itemsOn(s.items, day);
@@ -77,9 +86,11 @@ function dayBody(day, t) {
   let html = '';
   if (list.length) {
     const done = list.filter(o => o.status === 'done').length;
+    const visible = list.filter(o => o.status !== 'done' || ctx.showDone);
     html += `<div class="progress"><div class="progress-h"><span>Günlük ilerleme</span><b>${done} / ${list.length} tamamlandı</b></div><div class="track"><i style="width:${Math.round((done / list.length) * 100)}%"></i></div></div>
-      <div class="sec-h"><h3>Planlar</h3><span>${list.length} plan</span></div>
-      <div class="tasks">${list.map(o => itemRow(o, t)).join('')}</div>`;
+      <div class="sec-h"><h3>Planlar</h3><span>${list.length - done ? `${list.length - done} kaldı` : 'hepsi tamam'}</span></div>${swipeHint()}`;
+    html += visible.length ? `<div class="tasks">${visible.map(o => itemRow(o, t)).join('')}</div>` : `<div class="all-done">${icon('check')}<b>Bugünün planları tamam</b><span>Güzel iş. Dinlenmeyi unutma.</span></div>`;
+    if (done) html += doneToggle(done);
   }
   if (!list.length && !inbox.length) html += emptyDay(day, t);
   if (inbox.length) html += `<div class="sec-h"><h3>Yapılacaklar</h3><span>${inbox.length} iş</span></div><div class="tasks">${inbox.map(i => itemRow({ ...i, origin: '' }, t)).join('')}</div>`;
@@ -92,7 +103,7 @@ function weekBody(sel, t) {
   let html = `<div class="week-nav"><b>${+mon.slice(8)} ${MONTHS[+mon.slice(5, 7) - 1]} – ${+sun.slice(8)} ${MONTHS[+sun.slice(5, 7) - 1]}</b><div class="round-nav"><button type="button" data-act="shift" data-n="-7" aria-label="Önceki hafta">${icon('chevL')}</button><button type="button" data-act="shift" data-n="7" aria-label="Sonraki hafta">${icon('chevR')}</button></div></div>`;
   for (let i = 0; i < 7; i++) {
     const d = dayAdd(mon, i);
-    const list = itemsOn(s.items, d);
+    const list = itemsOn(s.items, d).filter(o => o.status !== 'done' || ctx.showDone);
     html += `<div class="wday"><div class="wday-h ${d === t ? 'today' : ''}">${DAY_NAMES[weekday(d)]}<small>${+d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1]}${d === t ? ' · Bugün' : ''}</small></div>`;
     html += list.length ? `<div class="tasks">${list.map(o => itemRow(o, t)).join('')}</div>` : `<button type="button" class="wday-empty" data-act="add" data-day="${d}">+ Boş · plan ekle</button>`;
     html += '</div>';
@@ -113,7 +124,7 @@ function monthBody(sel, t) {
     const dots = out ? [] : [...new Set(itemsOn(s.items, d).map(o => CATS[catOf(o)]?.color || ''))].slice(0, 3);
     grid += `<button type="button" class="mday ${out ? 'out' : ''} ${d === sel ? 'sel' : ''} ${d === t ? 'today' : ''}" data-act="pick-day" data-day="${d}"><span class="dd">${+d.slice(8)}</span><span class="dots">${dots.map(c => `<i ${c ? `style="--c:${c}"` : ''}></i>`).join('')}</span></button>`;
   }
-  const list = itemsOn(s.items, sel);
+  const list = itemsOn(s.items, sel).filter(o => o.status !== 'done' || ctx.showDone);
   return `<div class="cal-card"><div class="cal-top"><div><h3>${MONTHS[m - 1]} ${y}</h3><span class="badge">${isoWeek(sel)}. hafta</span></div>
       <div class="round-nav"><button type="button" data-act="month" data-n="-1" aria-label="Önceki ay">${icon('chevL')}</button><button type="button" data-act="month" data-n="1" aria-label="Sonraki ay">${icon('chevR')}</button></div></div>
       <div class="mgrid" data-swipe="month">${grid}</div></div>
@@ -170,6 +181,8 @@ export const planActs = {
     ctx.render();
   },
   today: () => { ctx.day = today(); ctx.month = ctx.day.slice(0, 7); haptic(); ctx.render(); },
+  'show-done': () => { ctx.showDone = !ctx.showDone; haptic(); ctx.render(); },
+  'swipe-del': el => deleteRow(el.closest('.swipe')),
   toggle: async el => {
     const { id, origin } = el.dataset;
     const item = get().items.find(i => i.id === id);
@@ -193,22 +206,124 @@ export const planActs = {
   },
 };
 
-// Gün şeridinde / ay ızgarasında yatay kaydırma.
-export function bindSwipe(view) {
-  let x0 = null, y0 = 0, kind = '';
-  view.addEventListener('touchstart', e => {
-    const s = e.target.closest('[data-swipe]');
-    if (!s) return;
-    kind = s.dataset.swipe; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-  }, { passive: true });
-  view.addEventListener('touchend', e => {
-    if (x0 === null) return;
-    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
-    x0 = null;
-    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
-    const dir = dx < 0 ? 1 : -1;
-    if (kind === 'week') planActs.shift({ dataset: { n: String(7 * dir) } });
-    else planActs.month({ dataset: { n: String(dir) } });
-    haptic();
+// ---- Kaydırma: kartta sola sil (sonuna kadar = otomatik), sağa tamamla; şerit/ayda hafta/ay değiştir ----
+let openRow = null;
+const closeRow = row => { row?.classList.remove('open'); const t = row?.querySelector('.task'); if (t) t.style.transform = ''; if (openRow === row) openRow = null; };
+function markSwiped() { try { localStorage.setItem('gp-swiped', '1'); } catch { /* yok */ } }
+
+function flyOut(wrap, dir) {
+  return new Promise(done => {
+    if (reduced()) return done();
+    const task = wrap.querySelector('.task');
+    task.style.transition = 'transform .26s cubic-bezier(.4, 0, 1, 1)';
+    task.style.transform = `translateX(${dir * 115}%)`;
+    wrap.style.height = wrap.offsetHeight + 'px';
+    requestAnimationFrame(() => {
+      wrap.style.transition = 'height .26s .16s cubic-bezier(.32,.72,0,1), margin .26s .16s, opacity .2s .16s';
+      wrap.style.height = '0px';
+      wrap.style.marginBottom = '-8px';
+      wrap.style.opacity = '0';
+    });
+    setTimeout(done, 440);
   });
+}
+
+async function completeRow(wrap) {
+  const { id, origin } = wrap.dataset;
+  const item = get().items.find(i => i.id === id);
+  if (!item) return;
+  const undo = wrap.classList.contains('is-done');
+  const next = undo ? 'pending' : 'done';
+  haptic('success');
+  await flyOut(wrap, 1);
+  const before = structuredClone(item);
+  await commit(s => {
+    const i = s.items.findIndex(x => x.id === id);
+    s.items[i] = item.date ? patchOccurrence(s.items[i], origin || item.date, { status: next }) : { ...s.items[i], status: next, updatedAt: new Date().toISOString() };
+  });
+  sync();
+  if (!undo) toast('Tamamlandı', { label: 'Geri al', run: () => commit(s => { const i = s.items.findIndex(x => x.id === id); if (i >= 0) s.items[i] = before; }).then(() => sync()) });
+}
+
+export async function deleteRow(wrap) {
+  const { id, origin } = wrap.dataset;
+  const item = get().items.find(i => i.id === id);
+  if (!item) return;
+  let choice = 'all';
+  if (item.repeat !== 'none' && origin) {
+    choice = await actions(`“${item.title}” tekrarlayan bir plan`, [{ label: 'Sadece bu günü sil', value: 'one' }, { label: 'Tüm seriyi sil', value: 'all', danger: true }]);
+    if (!choice) { closeRow(wrap); return; }
+  }
+  haptic('success');
+  await flyOut(wrap, -1);
+  const before = structuredClone(item);
+  await commit(s => {
+    if (choice === 'one') { const i = s.items.findIndex(z => z.id === id); s.items[i] = patchOccurrence(s.items[i], origin, { status: 'cancelled' }); }
+    else s.items = s.items.filter(z => z.id !== id);
+  });
+  sync();
+  toast(choice === 'one' ? 'Bu gün silindi' : 'Silindi', { label: 'Geri al', run: () => commit(s => { s.items = s.items.filter(z => z.id !== id).concat(before); }).then(() => sync()) });
+}
+
+export function bindSwipe(view) {
+  let sw = null, strip = null;
+  view.addEventListener('touchstart', e => {
+    const wrap = e.target.closest('.swipe');
+    if (openRow && openRow !== wrap) closeRow(openRow);
+    const p = e.touches[0];
+    if (wrap && !e.target.closest('.sb-r')) {
+      sw = { wrap, task: wrap.querySelector('.task'), x0: p.clientX, y0: p.clientY, base: wrap.classList.contains('open') ? -96 : 0, dx: 0, lock: null, w: wrap.offsetWidth, full: false, arm: false };
+      return;
+    }
+    const s = e.target.closest('[data-swipe]');
+    if (s) strip = { kind: s.dataset.swipe, x0: p.clientX, y0: p.clientY };
+  }, { passive: true });
+  view.addEventListener('touchmove', e => {
+    if (!sw) return;
+    const p = e.touches[0], dx = p.clientX - sw.x0, dy = p.clientY - sw.y0;
+    if (!sw.lock) {
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) sw.lock = 'x';
+      else if (Math.abs(dy) > 8) { sw.lock = 'y'; return; }
+      else return;
+    }
+    if (sw.lock !== 'x') return;
+    e.preventDefault();
+    let x = sw.base + dx;
+    if (x > 0) x = Math.min(x, sw.w * 0.6) * (x > 140 ? 0.92 : 1);
+    sw.dx = x;
+    sw.wrap.classList.add('dragging');
+    sw.wrap.classList.toggle('left', x < 0);
+    sw.wrap.classList.toggle('right', x > 0);
+    sw.task.style.transform = `translateX(${x}px)`;
+    const full = x < -sw.w * 0.55, arm = x > 88;
+    if (full !== sw.full) { sw.full = full; sw.wrap.classList.toggle('full', full); haptic(); }
+    if (arm !== sw.arm) { sw.arm = arm; sw.wrap.classList.toggle('arm', arm); haptic(); }
+  }, { passive: false });
+  const end = e => {
+    if (strip && !sw) {
+      const p = e.changedTouches[0], dx = p.clientX - strip.x0, dy = p.clientY - strip.y0, kind = strip.kind;
+      strip = null;
+      if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
+      const dir = dx < 0 ? 1 : -1;
+      if (kind === 'week') planActs.shift({ dataset: { n: String(7 * dir) } });
+      else planActs.month({ dataset: { n: String(dir) } });
+      haptic();
+      return;
+    }
+    if (!sw) return;
+    const { wrap, task, dx, lock, full, arm } = sw;
+    sw = null;
+    if (lock !== 'x') return;
+    ctx.swipedAt = Date.now();
+    markSwiped();
+    wrap.classList.remove('dragging', 'full', 'arm');
+    if (full) { wrap.classList.remove('right'); wrap.classList.add('left'); deleteRow(wrap); return; }
+    if (arm) { completeRow(wrap); return; }
+    wrap.classList.remove('left', 'right');
+    if (dx < -56) { wrap.classList.add('open'); task.style.transform = ''; openRow = wrap; }
+    else closeRow(wrap);
+  };
+  view.addEventListener('touchend', end);
+  view.addEventListener('touchcancel', end);
+  view.addEventListener('scroll', () => { if (openRow) closeRow(openRow); }, { passive: true });
 }

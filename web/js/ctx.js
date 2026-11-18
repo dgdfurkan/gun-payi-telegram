@@ -10,6 +10,8 @@ export const ctx = {
   pop: null,      // az önce tamamlanan satır (animasyon)
   enter: null,    // az önce eklenen plan (animasyon)
   noteQuery: '',
+  showDone: false,
+  swipedAt: 0,
   render: () => {},
   go: () => {},
 };

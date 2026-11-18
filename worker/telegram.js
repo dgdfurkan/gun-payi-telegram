@@ -82,17 +82,18 @@ export function draftView(d, today, mode = 'main', defaults = [10]) {
   lines.push(`📝 <b>Taslak</b>`, `${emojiOf(it)} <b>${esc(it.title)}</b>`, `📅 ${esc(when)}`, `🕐 ${it.time ? (it.endTime ? `${it.time}–${it.endTime}` : it.time) : 'Saat yok'}`);
   if (it.time) lines.push(`🔔 ${esc(remindersLabel(rem))}`);
   if (d.ai) lines.push('<i>✨ AI ile anlaşıldı, kontrol et</i>');
-  if (mode === 'main') lines.push('', '<i>Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.</i>');
+  const hint = { main: 'Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.', day: 'Ya da tarihi yaz: “20 Aralık”, “20 Aralık 2027”, “haftaya cuma”.', time: 'Ya da saati yaz: “17:34”.', rem: 'Ya da süreyi yaz: “30 dk”, “1 sa 15 dk”, “10 ve 15 dk”.', txt: '✏️ Yeni başlığı yazıp gönder.' }[mode];
+  if (hint) lines.push('', `<i>${hint}</i>`);
   const back = ['← Geri', x('back')];
   let rows;
   if (mode === 'day') {
     const days = Array.from({ length: 8 }, (_, i) => dayAdd(today, i));
     const label = (dd, i) => (i === 0 ? 'Bugün' : i === 1 ? 'Yarın' : `${DAY_SHORT[weekday(dd)]} ${+dd.slice(8)}`);
     const mark = (dd, l) => (it.repeat === 'none' && it.date === dd ? '✓ ' + l : l);
-    rows = [days.slice(0, 4).map((dd, i) => [mark(dd, label(dd, i)), x('d', dd)]), days.slice(4).map((dd, i) => [mark(dd, label(dd, i + 4)), x('d', dd)]), [[it.date ? 'Tarihsiz' : '✓ Tarihsiz', x('d', '')], back]];
+    rows = [days.slice(0, 4).map((dd, i) => [mark(dd, label(dd, i)), x('d', dd)]), days.slice(4).map((dd, i) => [mark(dd, label(dd, i + 4)), x('d', dd)]), [['Haftaya', x('d', dayAdd(it.date || today, 7))], [it.date ? 'Tarihsiz' : '✓ Tarihsiz', x('d', '')], back]];
   } else if (mode === 'time') {
     const t = v => [(it.time === v ? '✓ ' : '') + v, x('t', v.replace(':', ''))];
-    rows = [['08:00', '09:00', '10:00', '12:00'].map(t), ['14:00', '17:00', '19:00', '21:00'].map(t), [['−1 sa', x('s', -60)], ['−15 dk', x('s', -15)], ['+15 dk', x('s', 15)], ['+1 sa', x('s', 60)]], [[it.time ? 'Saatsiz' : '✓ Saatsiz', x('t', 'none')], back]];
+    rows = [['08:00', '09:00', '12:00', '14:00'].map(t), ['17:00', '19:00', '20:00', '21:00'].map(t), [['−15 dk', x('s', -15)], ['−5 dk', x('s', -5)], ['+5 dk', x('s', 5)], ['+15 dk', x('s', 15)]], [['−1 sa', x('s', -60)], ['+1 sa', x('s', 60)], [it.time ? 'Saatsiz' : '✓ Saatsiz', x('t', 'none')], back]];
   } else if (mode === 'rem') {
     const r = ([v, l]) => [(rem.includes(v) ? '✓ ' : '') + l, x('r', v)];
     rows = [REM_OPTS.slice(0, 4).map(r), REM_OPTS.slice(4).map(r), [[rem.length ? 'Hatırlatma yok' : '✓ Hatırlatma yok', x('r', 'none')], back]];
@@ -100,8 +101,10 @@ export function draftView(d, today, mode = 'main', defaults = [10]) {
     const cur = it.repeat === 'weekly' ? (it.weekdays.join() === '1,2,3,4,5' ? 'weekdays' : it.weekdays.join() === '6,0' ? 'weekend' : 'weekly') : it.repeat;
     const p = (v, l) => [(cur === v ? '✓ ' : '') + l, x('p', v)];
     rows = [[p('none', 'Tekrar yok'), p('daily', 'Her gün')], [p('weekdays', 'Hafta içi'), p('weekend', 'Hafta sonu')], [p('weekly', 'Her hafta'), p('monthly', 'Her ay')], [back]];
+  } else if (mode === 'txt') {
+    rows = [[back]];
   } else {
-    rows = [[['✅ Ekle', x('ok')], ['✖️ Vazgeç', x('no')]], [['📅 Gün', x('day')], ['🕐 Saat', x('time')], ['🔔 Hatırlat', x('rem')]], [['🔁 Tekrar', x('rep')]]];
+    rows = [[['✅ Ekle', x('ok')], ['✖️ Vazgeç', x('no')]], [['📅 Gün', x('day')], ['🕐 Saat', x('time')], ['🔔 Hatırlat', x('rem')]], [['🔁 Tekrar', x('rep')], ['✏️ Yazı', x('txt')]]];
   }
   return { text: lines.join('\n'), markup: buttons(rows) };
 }

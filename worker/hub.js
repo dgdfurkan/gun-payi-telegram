@@ -2,7 +2,7 @@
 // her kullanıcının plan aynasını, olay kuyruğunu ve hatırlatma alarmını tutar.
 import { DurableObject } from 'cloudflare:workers';
 import { jobsFor, cleanItem, cleanPrefs, dayAt, dayAdd, zonedMs, patchOccurrence, occurrence, uid, weekday, toMin, fromMin } from '../web/js/core.js';
-import { parse, toItem } from '../web/js/parse.js';
+import { parse, toItem, parseDurations, parseClock } from '../web/js/parse.js';
 import { tg, send, buttons, esc, HELP, reminderMessage, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
 import { transcribe, aiParse } from './ai.js';
 
@@ -243,6 +243,9 @@ export class ReminderHub extends DurableObject {
     const s = this.s, now = Date.now();
     const head = voice ? `🎙 <i>“${esc(text)}”</i>\n\n` : '';
     for (const [id, d] of Object.entries(s.drafts)) if (d.at < now - 86400000) delete s.drafts[id];
+    // Taslakta bir menü açıksa (Yazı, Gün, Saat, Hatırlat) yazılan metin o alana gider.
+    const awaiting = Object.values(s.drafts).filter(d => d.await && d.at > now - 30 * 60000).sort((a, b) => b.at - a.at)[0];
+    if (awaiting) return this.applyTyped(awaiting, text, voice);
     // Açık taslak varken yalnız zaman bilgisi yazılırsa ("yarın 10'da") taslağı düzelt.
     const rule = parse(text, { now, tz: this.tz });
     const open = Object.values(s.drafts).filter(d => d.at > now - 30 * 60000).sort((a, b) => b.at - a.at)[0];
@@ -276,6 +279,36 @@ export class ReminderHub extends DurableObject {
     }
   }
 
+  async applyTyped(d, text, voice) {
+    const it = { ...d.item }, now = Date.now(), tz = this.tz, today = dayAt(now, tz);
+    let err = '';
+    if (d.await === 'title') {
+      const t = text.trim().replace(/\s+/g, ' ').slice(0, 300);
+      if (t) it.title = t[0].toLocaleUpperCase('tr') + t.slice(1); else err = 'Başlık boş olamaz.';
+    } else if (d.await === 'rem') {
+      const v = parseDurations(text);
+      if (v === null) err = 'Süreyi anlayamadım. Örnek: <i>30 dk</i>, <i>1 sa 15 dk</i>, <i>10 ve 15 dk</i>';
+      else it.reminders = v;
+    } else if (d.await === 'time') {
+      const c = parseClock(text, { now, tz });
+      if (!c) err = 'Saati anlayamadım. Örnek: <i>17:34</i>';
+      else { it.time = c; it.endTime = ''; if (!it.date) it.date = today; }
+    } else if (d.await === 'day') {
+      const r = parse(text, { now, tz });
+      if (r.found?.repeat) { it.repeat = r.repeat; it.weekdays = r.weekdays; it.date = r.date || it.date || today; }
+      else if (r.found?.date) { it.date = r.date; it.repeat = 'none'; it.weekdays = []; }
+      else err = 'Tarihi anlayamadım. Örnek: <i>20 Aralık</i>, <i>20 Aralık 2027</i>, <i>haftaya cuma</i>';
+      if (!err && r.found?.time) { it.time = r.time; it.endTime = r.endTime; }
+    }
+    if (err) { d.at = now; await this.save('drafts'); return send(this.env, this.chatId, `${err}\n<i>Menüden çıkmak için taslaktaki ← Geri.</i>`); }
+    try { d.item = cleanItem(it); } catch (e) { return send(this.env, this.chatId, esc(e.message)); }
+    d.await = null;
+    d.at = now;
+    if (voice) d.voice = text;
+    await tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: d.mid, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    return this.showDraft(d, 'main', true);
+  }
+
   async showDraft(draft, mode = 'main', fresh = false) {
     const view = draftView(draft, dayAt(Date.now(), this.tz), mode, this.s.cal.prefs.reminderDefaults);
     if (fresh || !draft.mid) {
@@ -297,6 +330,7 @@ export class ReminderHub extends DurableObject {
       return tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }
     d.mid = cb.message.message_id;
+    d.at = now;
     const it = d.item;
     if (op === 'ok') {
       const item = cleanItem({ ...it, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -315,7 +349,8 @@ export class ReminderHub extends DurableObject {
       return tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: `✖️ <s>${esc(it.title)}</s>`, parse_mode: 'HTML' }).catch(() => {});
     }
     let mode = 'main';
-    if (['day', 'time', 'rem', 'rep'].includes(op)) mode = op;
+    d.await = null;
+    if (['day', 'time', 'rem', 'rep', 'txt'].includes(op)) { mode = op; d.await = { day: 'day', time: 'time', rem: 'rem', txt: 'title' }[op] || null; }
     else if (op === 'd') {
       it.date = arg || ''; it.repeat = 'none'; it.weekdays = [];
       if (!it.date) { it.time = ''; it.endTime = ''; }
@@ -326,14 +361,14 @@ export class ReminderHub extends DurableObject {
       const base = it.time ? toMin(it.time) : 9 * 60;
       it.time = fromMin(base + Number(arg)); it.endTime = '';
       if (!it.date) it.date = today;
-      mode = 'time';
+      mode = 'time'; d.await = 'time';
     } else if (op === 'r') {
       if (arg === 'none') it.reminders = [];
       else {
         const v = Number(arg), cur = it.reminders ?? s.cal.prefs.reminderDefaults;
         it.reminders = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
       }
-      mode = 'rem';
+      mode = 'rem'; d.await = 'rem';
     } else if (op === 'p') {
       const start = it.date || today;
       it.date = start;

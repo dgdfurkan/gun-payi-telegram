@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **18 Kasım 2026**. Sürüm **5.2.0**.
+Güncelleme: **18 Kasım 2026**. Sürüm **5.3.0**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,12 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.3
+
+- **Kaydırma:** plan kartında sola kaydırma "Sil" düğmesini açar, kartın yarısından fazla kaydırma otomatik siler (tekrarlayan planda "Sadece bu gün / Tüm seri" sorulur). Sağa kaydırma tamamlar. Her ikisinde de geri al bildirimi var. İlk kaydırmaya kadar küçük bir ipucu görünür.
+- **Tik düğmesi kaldırıldı:** tamamlananlar listeden düşer; altta "N tamamlandı · göster" ile açılır, orada sağa kaydırma geri alır. Düzenleme sayfasında "Tamamlandı" düğmesi var.
+- **Telegram taslağı:** ✏️ Yazı ile başlık düzeltilir. Gün / Saat / Hatırlat menüsü açıkken yazılan metin o alana uygulanır: "20 Aralık 2027", "haftaya cuma", "1734", "17:34", "30 dk", "1 sa 15 dk", "10 ve 15 dk". Saat menüsünde ±5 / ±15 dk ve ±1 sa. `parseDurations`, `parseClock` (`web/js/parse.js`).
 
 ## 5.2 (Stitch tasarımı)
 
