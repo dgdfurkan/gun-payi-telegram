@@ -165,6 +165,13 @@ function hideSplash() {
   api.sync(true).then(r => { if (r) render(); });
   if ('serviceWorker' in navigator) {
     if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
-    else navigator.serviceWorker.register('/sw.js').catch(() => {});
+    else {
+      // Açılışın hemen ardından yeni sürüm devreye girerse bir kez yenile: eski stil ile yeni kod karışmasın.
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hadController && performance.now() < 10000 && !document.querySelector('.sheet-root, .welcome')) location.reload();
+      });
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
   }
 })();
