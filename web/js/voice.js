@@ -1,15 +1,20 @@
 // Türkçe sesle yazma (Web Speech). iOS ana ekran uygulamasında izin her soğuk açılışta bir kez
 // sorulabilir (WebKit hatası). Adres değişmediği sürece aynı oturumda tekrar sorulmaz.
+//
+// iOS bazen "bitti" (onend) olayını hiç göndermez ya da izin penceresinden sonra sessizce düşer.
+// Bu yüzden her oturum kendi kimliğini taşır, eski olaylar yok sayılır ve bekçi zamanlayıcılar
+// takılan oturumu kapatır. Sonuç: her dokunuş ya başlatır ya durdurur, asla boşa gitmez.
 const Engine = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 export const voiceSupported = () => Boolean(Engine());
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-const SILENCE = 1800;   // susunca bu kadar sonra durur
-const MAX = 30000;      // en uzun dinleme
-let rec = null, silenceTimer = null, maxTimer = null;
-export const listening = () => Boolean(rec);
+const SILENCE = 2200;     // sonuç gelmeyince durdur
+const MAX = 30000;        // en uzun dinleme
+const START_WAIT = 12000; // izin penceresi dahil başlama beklemesi
+const STOP_WAIT = 1500;   // durdurduktan sonra "bitti" gelmezse kapat
+let cur = null;           // { r, started, heard, err, finish }
+export const listening = () => Boolean(cur);
 
-// Sonuçlardan tam metni çıkarır. iOS bazen her sonuca baştan beri olan metni koyar (birikimli);
-// bu durumda son sonucu, değilse hepsini birleştirir. Böylece aynı cümle iki kez yazılmaz.
 export function transcriptOf(results) {
   const parts = [];
   for (let i = 0; i < results.length; i++) parts.push(String(results[i][0]?.transcript || '').trim());
@@ -21,52 +26,69 @@ export function transcriptOf(results) {
   return clean.join(' ').replace(/\s+/g, ' ');
 }
 
-// onText(metin, kesin mi), onState('listening'|'idle'|'error', mesaj)
+function message(code, started) {
+  if (code === 'not-allowed') return started ? 'Mikrofon izni kapalı. Klavyedeki mikrofon izin sormadan yazar.' : 'İzin verdiysen bir kez daha dokun.';
+  return {
+    'service-not-allowed': 'Dikte kapalı: Ayarlar → Genel → Klavye → Dikte.',
+    'no-speech': 'Ses duyulmadı, bir kez daha dokun.',
+    'network': 'Sesle yazma için internet gerekli.',
+    'audio-capture': 'Mikrofon şu an kullanılamıyor.',
+  }[code] || 'Ses alınamadı, bir kez daha dokun.';
+}
+
+// onText(metin, kesin mi); onState('starting'|'listening'|'idle'|'error', mesaj)
 export function startDictation({ base = '', onText, onState }) {
-  abortDictation();
+  resetDictation();
   const R = Engine();
   if (!R) { onState('error', 'Bu cihazda sesle yazma yok. Klavyedeki mikrofonu kullan.'); return; }
   const r = new R();
-  rec = r;
+  const me = { r, started: false, heard: '', err: '', done: false };
+  const timers = [];
+  const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+  let silence;
+  const join = (a, b) => [a.trim(), b.trim()].filter(Boolean).join(' ');
+  me.finish = () => {
+    if (me.done) return;
+    me.done = true;
+    timers.forEach(clearTimeout); clearTimeout(silence);
+    if (cur === me) cur = null;
+    try { r.abort(); } catch { /* zaten kapalı */ }
+    onText(join(base, me.heard), true);
+    if (me.err && !me.heard) onState('error', me.err); else onState('idle');
+  };
+  me.stop = () => {
+    if (!me.started) { me.finish(); return; } // başlamadan dokunulursa iptal
+    try { r.stop(); } catch { /* yok */ }
+    later(() => me.finish(), STOP_WAIT);
+  };
+  cur = me;
   r.lang = 'tr-TR';
   r.interimResults = true;
-  r.continuous = true;
+  r.continuous = !IOS; // iOS'ta tek cümle modu daha kararlı; motor susunca kendisi bitirir
   r.maxAlternatives = 1;
-  let heard = '';
-  const join = (a, b) => [a.trim(), b.trim()].filter(Boolean).join(' ');
-  const arm = () => { clearTimeout(silenceTimer); silenceTimer = setTimeout(() => stopDictation(), SILENCE); };
-  r.onstart = () => { onState('listening'); maxTimer = setTimeout(() => stopDictation(), MAX); };
+  r.onstart = () => {
+    if (me.done) return;
+    me.started = true;
+    onState('listening');
+    later(() => me.stop(), MAX);
+  };
   r.onresult = e => {
-    heard = transcriptOf(e.results);
-    onText(join(base, heard), false);
-    arm();
+    if (me.done) return;
+    me.heard = transcriptOf(e.results);
+    onText(join(base, me.heard), false);
+    clearTimeout(silence);
+    silence = setTimeout(() => me.stop(), SILENCE);
   };
-  r.onerror = e => {
-    const msg = {
-      'not-allowed': 'Mikrofon izni verilmedi. Klavyedeki mikrofon izin sormadan yazar.',
-      'service-not-allowed': 'Dikte kapalı: Ayarlar → Genel → Klavye → Dikte.',
-      'no-speech': 'Ses duyulmadı, tekrar dene.',
-      'network': 'Sesle yazma için internet gerekli.',
-      'audio-capture': 'Mikrofon kullanılamıyor.',
-    }[e.error] || 'Sesle yazma durdu.';
-    if (e.error !== 'aborted') onState('error', msg);
-  };
-  r.onend = () => {
-    clearTimeout(silenceTimer); clearTimeout(maxTimer);
-    if (rec === r) rec = null;
-    onText(join(base, heard), true);
-    onState('idle');
-  };
-  try { r.start(); } catch { rec = null; onState('error', 'Sesle yazma başlatılamadı.'); }
+  r.onerror = e => { if (!me.done && e.error !== 'aborted') me.err = message(e.error, me.started); };
+  r.onend = () => me.finish();
+  onState('starting');
+  later(() => { if (!me.started) { me.err = me.err || 'Mikrofon başlamadı, bir kez daha dokun.'; me.finish(); } }, START_WAIT);
+  try { r.start(); } catch { me.err = 'Sesle yazma başlatılamadı, bir kez daha dokun.'; me.finish(); }
 }
-export function stopDictation() {
-  clearTimeout(silenceTimer); clearTimeout(maxTimer);
-  if (!rec) return;
-  try { rec.stop(); } catch { /* zaten durdu */ }
-}
-export function abortDictation() {
-  clearTimeout(silenceTimer); clearTimeout(maxTimer);
-  if (!rec) return;
-  const r = rec; rec = null;
-  try { r.abort(); } catch { /* yok */ }
-}
+export function stopDictation() { cur?.stop(); }
+export function abortDictation() { if (cur) { cur.err = ''; cur.finish(); } }
+export function resetDictation() { abortDictation(); }
+
+// Uygulama arka plana geçince açık oturumu kapat; dönüşte temiz başlansın.
+document.addEventListener('visibilitychange', () => { if (document.hidden) abortDictation(); });
+window.addEventListener('pagehide', () => abortDictation());

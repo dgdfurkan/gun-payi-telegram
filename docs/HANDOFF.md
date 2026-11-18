@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **18 Kasım 2026**. Sürüm **5.1.0**.
+Güncelleme: **18 Kasım 2026**. Sürüm **5.1.1**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,11 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.1.1
+
+- **Ses:** iOS bazen `onend` göndermiyor ya da izin penceresinden sonra sessizce düşüyordu; uygulama hâlâ dinliyor sanıp sonraki dokunuşu "durdur" sayıyordu. Artık her oturum kimlikli, eski olaylar yok sayılıyor, bekçi zamanlayıcılar (başlama 12 sn, durdurma 1,5 sn) takılan oturumu kapatıyor, arka plana geçince oturum sıfırlanıyor. iOS'ta tek cümle modu. `tests/voice.test.mjs` bu durumları taklit eder.
+- **Widget:** ana ekran uygulaması dış bağlantıyı kendi içindeki tarayıcıda açıyor ve o pencere `.shortcut` dosyasını Kısayollar'a veremiyor. Düğme artık `x-safari-https://` ile gerçek Safari'yi açıyor (Apple belgelemiyor, yaygın olarak çalıştığı bildiriliyor). Yanına kurulumsuz yol eklendi: Telegram widget'ı → bot sohbeti → sesli mesaj → taslak.
 
 ## Doğrulananlar
 

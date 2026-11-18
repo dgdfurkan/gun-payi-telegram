@@ -163,27 +163,38 @@ function widgetSheet() {
   const l = api.link();
   const token = api.token();
   const url = location.origin + '/api/quick';
+  // Ana ekran uygulaması dış bağlantıları kendi içindeki tarayıcıda açar; o pencere kısayol dosyasını
+  // Kısayollar'a veremez. x-safari-https gerçek Safari'yi açar, Safari dosyayı Kısayollar'a aktarır.
+  const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  const scHref = standalone ? `x-safari-https://${location.host}/kisayol.shortcut` : '/kisayol.shortcut';
+  const bot = l?.bot || 'hatirlat_gunduz_bot';
   sheet({
-    title: 'Ana ekran widget’ı', left: 'Kapat',
+    title: 'Ana ekrandan ekle', left: 'Kapat',
     body: `<div class="form">
-      <div class="wg-hero"><div class="wg-ic">${icon('mic')}</div><div><b>Ana ekrandan tek dokunuşla ekle</b><span>Konuş, eklensin. Uygulamayı açmana gerek yok, izin her seferinde sorulmaz.</span></div></div>
-      ${l ? `<div class="step" data-step="1"><span class="step-n">1</span><div class="step-b"><b>Kısayolu ekle</b>
-          <p>Dokununca bağlantı kodun kopyalanır ve Kısayollar açılır. Safari indirmeyi sorarsa <b>İndir</b>, sonra dosyaya dokun. “Bağlantı kodu” sorusuna <b>yapıştır</b> → <b>Kısayol Ekle</b>.</p>
-          <a class="big-btn" href="/kisayol.shortcut" target="_blank" rel="noopener" data-x="sc">${icon('widget')}Kısayolu ekle</a></div></div>
-        <div class="step"><span class="step-n">2</span><div class="step-b"><b>Ana ekrana koy</b>
-          <div class="howto"><div>${icon('plan')}Ana ekranda boş yere basılı tut</div><div>${icon('plus')}Düzenle → Widget Ekle</div><div>${icon('widget')}Kısayollar → Gün Payı’na ekle</div></div></div></div>
-        <div class="step"><span class="step-n">3</span><div class="step-b"><b>Dene</b><p>Widget’a dokun, “Yarın 9’da spor” de. Plana eklenir, bildirim gelir, Telegram’dan hatırlatılır.</p></div></div>
-        <details class="manual"><summary>Kısayol açılmazsa elle kur</summary><ol class="steps">
+      <div class="wg-hero"><div class="wg-ic">${icon('mic')}</div><div><b>Ana ekrandan tek dokunuşla ekle</b><span>İki yol var. İkisi de mikrofon iznini her seferinde sormaz.</span></div></div>
+      ${l ? `
+      <div class="section-h">1 · Telegram widget’ı · kurulumsuz</div>
+      <div class="step"><span class="step-n">${icon('tg')}</span><div class="step-b"><b>Bot sohbetini ana ekrana koy</b>
+        <div class="howto"><div>${icon('plan')}Ana ekranda boş yere basılı tut</div><div>${icon('plus')}Düzenle → Widget Ekle → Telegram</div><div>${icon('tg')}Widget’ı düzenle → Gün Payı botu</div></div>
+        <p>Widget’a dokun, mikrofona basılı tutup konuş. Bot taslağı gösterir, <b>Ekle</b> dersin.</p>
+        <a class="big-btn tg" href="https://t.me/${esc(bot)}" target="_blank" rel="noopener">${icon('tg')}Botu aç</a></div></div>
+      <div class="section-h">2 · Siri kısayolu · uygulama açılmaz</div>
+      <div class="step" data-step="1"><span class="step-n">1</span><div class="step-b"><b>Kısayolu ekle</b>
+          <p>Dokununca kodun kopyalanır ve <b>Safari</b> açılır. İndirmek isterse <b>İndir</b>, sonra dosyaya dokun. Kısayollar “Bağlantı kodu” sorunca <b>yapıştır</b> → <b>Kısayol Ekle</b>.</p>
+          <a class="big-btn" href="${scHref}" rel="noopener" data-x="sc">${icon('widget')}Kısayolu ekle</a></div></div>
+      <div class="step"><span class="step-n">2</span><div class="step-b"><b>Widget’ı koy</b>
+          <div class="howto"><div>${icon('plan')}Ana ekranda boş yere basılı tut</div><div>${icon('plus')}Düzenle → Widget Ekle</div><div>${icon('widget')}Kısayollar → Gün Payı’na ekle</div></div>
+          <p>Dokun, “Yarın 9’da spor” de. Plana eklenir. “Hey Siri, Gün Payı’na ekle” de çalışır.</p></div></div>
+      <details class="manual"><summary>Kısayol yine açılmazsa elle kur</summary><ol class="steps">
           <li>Kısayollar → <b>+</b> → <b>Metni Dikte Et</b> (Türkçe).</li>
           <li><b>URL’nin İçeriğini Al</b>: <code>${esc(url)}</code>, Yöntem <b>POST</b>, Başlık <b>Authorization</b> = <code>Bearer</code> + boşluk + kod, Gövde <b>JSON</b>: <b>text</b> = Dikte Edilen Metin.</li>
           <li><b>Bildirim Göster</b>: URL’nin İçeriği.</li></ol>
           <button type="button" class="chip" data-x="copy" style="margin:4px 0 6px">${icon('copy')}Kodu kopyala</button></details>`
-      : `<div class="empty"><div class="em-ic">${icon('tg')}</div><b>Önce Telegram’a bağlan</b>Widget planı senin sunucuna gönderir; bunun için tek seferlik bağlantı gerekir.</div>`}
+      : `<div class="empty"><div class="em-ic">${icon('tg')}</div><b>Önce Telegram’a bağlan</b>İki yol da planı senin sunucuna gönderir; bunun için tek seferlik bağlantı gerekir.</div>`}
     </div>`,
     onMount: sh => sh.body.addEventListener('click', e => {
       const x = e.target.closest('[data-x]')?.dataset.x;
       if (x === 'sc') {
-        // Bağlantıyı engellemeden kodu panoya koy; Kısayollar sorusunda yapıştırılır.
         copyText(token).then(ok => toast(ok ? 'Kod kopyalandı, Kısayollar’da yapıştır' : 'Kod kopyalanamadı, elle kopyala'));
         sh.body.querySelector('[data-step="1"]')?.classList.add('done');
         haptic('success');

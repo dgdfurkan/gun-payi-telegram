@@ -160,21 +160,24 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
   addBtn.addEventListener('click', () => submit());
 
   if (mic) mic.addEventListener('click', () => {
-    if (listening()) { stopDictation(); return; }
-    haptic();
+    if (listening()) { stopDictation(); haptic(); return; }
     ta.blur();
     closePicker();
+    // Önce başlat (iOS kullanıcı dokunuşunu ister), sonra titreşim.
     startDictation({
       base: ta.value,
       onText: (value, final) => { ta.value = value; grow(); reparse(final); },
       onState: (state, msg) => {
-        mic.classList.toggle('on', state === 'listening');
-        mic.innerHTML = icon(state === 'listening' ? 'stop' : 'mic');
-        if (state === 'listening') setStatus('Dinliyorum…', 'Bitince kendiliğinden durur', 'live');
+        const busy = state === 'listening' || state === 'starting';
+        mic.classList.toggle('on', busy);
+        mic.innerHTML = icon(busy ? 'stop' : 'mic');
+        if (state === 'starting') setStatus('Hazırlanıyor…', 'İzin sorulursa İzin Ver’e dokun', 'live');
+        else if (state === 'listening') setStatus('Dinliyorum…', 'Susunca kendiliğinden durur', 'live');
         else if (state === 'error') setStatus('Ses alınamadı', msg, 'err');
         else setStatus(ta.value.trim() ? 'Hazır' : 'Dokun ve konuş', ta.value.trim() ? 'Kontrol et, Ekle’ye dokun' : '“Her cuma 12’de babaannemi ara”');
       },
     });
+    haptic();
   });
 
   async function submit() {

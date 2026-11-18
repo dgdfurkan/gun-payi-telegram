@@ -1,5 +1,5 @@
 // Uygulama kabuğunu önbellekler; kişisel veri IndexedDB'de kalır, burada silinmez.
-const VERSION = '5.1.0';
+const VERSION = '5.1.1';
 const CACHE = 'gp-' + VERSION;
 const SHELL = [
   '/', '/app.css', '/manifest.webmanifest',
