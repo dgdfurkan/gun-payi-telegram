@@ -39,13 +39,15 @@ function setup({ ai = true } = {}) {
       },
     } : undefined,
   };
+  let nextMid = 100;
   globalThis.fetch = async (url, init = {}) => {
     const u = String(url);
     if (u.includes('/file/bot')) return new Response(new Uint8Array([1, 2, 3]));
     const method = u.split('/').pop();
     const body = init.body ? JSON.parse(init.body) : {};
-    calls.push({ method, body });
-    const result = { getMe: { username: 'GunPayiBot', first_name: 'Gün Payı' }, getFile: { file_path: 'voice/a.oga' }, sendMessage: { message_id: 7 } }[method] ?? true;
+    const id = method === 'sendMessage' ? ++nextMid : undefined;
+    calls.push({ method, body, id });
+    const result = { getMe: { username: 'GunPayiBot', first_name: 'Gün Payı' }, getFile: { file_path: 'voice/a.oga' }, sendMessage: { message_id: id } }[method] ?? true;
     return new Response(JSON.stringify({ ok: true, result }));
   };
   const call = (path, { method = 'POST', body, auth, headers = {} } = {}) => worker.fetch(new Request('https://gp.example.dev' + path, {
@@ -96,7 +98,8 @@ test('bağlı olmayan sohbet yönlendirilir', async () => {
   assert.ok(t.calls.some(c => c.method === 'sendMessage' && /Telegram'a bağlan/.test(c.body.text)));
 });
 
-const press = async (t, data) => t.hook({ update_id: updateId++, callback_query: { id: 'cb' + updateId, from: { id: 42 }, data, message: { message_id: 7, chat: { id: 42, type: 'private' } } } });
+const press = async (t, data, mid) => t.hook({ update_id: updateId++, callback_query: { id: 'cb' + updateId, from: { id: 42 }, data, message: { message_id: mid ?? t.calls.filter(c => c.method === 'sendMessage').at(-1)?.id ?? 7, chat: { id: 42, type: 'private' } } } });
+const deleted = t => t.calls.filter(c => c.method === 'deleteMessage').map(c => c.body.message_id);
 const lastSent = t => t.calls.filter(c => c.method === 'sendMessage' || c.method === 'editMessageText').at(-1);
 const btn = (msg, label) => msg.body.reply_markup.inline_keyboard.flat().find(b => b.text.includes(label))?.callback_data;
 
@@ -149,8 +152,9 @@ test('taslak düğmelerle ve yazarak düzeltilir', async () => {
   assert.equal(sync.events[0].item.time, '10:00');
   assert.equal(sync.events[0].item.repeat, 'none');
   await t.hook(message('Kitap oku'));
+  const card = t.calls.filter(c => c.method === 'sendMessage').at(-1).id;
   await press(t, btn(lastSent(t), 'Vazgeç'));
-  assert.match(lastSent(t).body.text, /✖️/);
+  assert.ok(deleted(t).includes(card), 'vazgeçilen taslak silinir');
 });
 
 test('taslakta menüye girince yazılan metin o alana uygulanır', async () => {
@@ -192,6 +196,43 @@ test('gün menüsünde "haftaya cuma" yazılabilir', async () => {
   await t.hook(message('haftaya cuma'));
   assert.match(lastSent(t).body.text, /📅/);
   assert.doesNotMatch(lastSent(t).body.text, /anlayamadım/);
+});
+
+test('sohbet temizliği: eklenince ara mesajlar, bitince plan kartı silinir', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  const userMsg = message('Spor');
+  await t.hook(userMsg);
+  const firstCard = t.calls.filter(c => c.method === 'sendMessage').at(-1).id;
+  await press(t, btn(lastSent(t), 'Saat'));
+  const typed = message('1734');
+  await t.hook(typed);
+  const card = t.calls.filter(c => c.method === 'sendMessage').at(-1).id;
+  assert.ok(deleted(t).includes(firstCard), 'eski taslak kartı yenisi gelince silinir');
+  await press(t, btn(lastSent(t), 'Ekle'));
+  const gone = deleted(t);
+  assert.ok(gone.includes(userMsg.message.message_id), 'kullanıcının mesajı silinir');
+  assert.ok(gone.includes(typed.message.message_id), 'yazılan düzeltme silinir');
+  assert.ok(!gone.includes(card), 'plan kartı kalır');
+  const first = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const item = first.events[0].item;
+  await t.call('/api/sync', { auth, body: { cursor: first.cursor, items: [item], prefs: {} } });
+  await t.call('/api/sync', { auth, body: { cursor: first.cursor, items: [{ ...item, status: 'done' }], prefs: {} } });
+  assert.ok(deleted(t).includes(card), 'uygulamada tamamlanınca kart silinir');
+});
+
+test('hatırlatmadaki Tamamlandı mesajları siler, eskimiş düğme takılmaz', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  const { day, minutes } = clockAt(Date.now() + 2 * 60000, 'Europe/Istanbul');
+  const item = { id: 'r1', title: 'İlaç', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], status: 'pending', exceptions: {} };
+  await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+  await t.hubs.get('chat:42').alarm();
+  const reminder = t.calls.filter(c => c.method === 'sendMessage').at(-1);
+  await press(t, reminder.body.reply_markup.inline_keyboard[0][0].callback_data, reminder.id);
+  assert.ok(deleted(t).includes(reminder.id), 'hatırlatma mesajı silinir');
+  await press(t, 'd:yok:2026-01-01', 555);
+  assert.ok(deleted(t).includes(555), 'artık olmayan planın düğmesi mesajı kaldırır');
 });
 
 test('saatsiz metin yapılacaklara düşer, not komutu not olur', async () => {

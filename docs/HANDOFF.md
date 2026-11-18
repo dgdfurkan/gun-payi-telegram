@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **18 Kasım 2026**. Sürüm **5.4.0**.
+Güncelleme: **18 Kasım 2026**. Sürüm **5.5.0**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,10 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.5
+
+- **Telegram sohbet temizliği:** DO her planın mesajlarını izler (`msgs`: taslak kartı, kullanıcının mesajı, yazılan düzeltmeler, ara cevaplar, Eklendi kartı, hatırlatmalar). Ekle'de ara mesajlar silinir, plan başına tek kart kalır. Vazgeç taslağı tamamen siler. Plan uygulamada ya da Telegram'da tamamlanınca/silinince kartı ve hatırlatmaları silinir; tekrarlayan planda yalnız o günün hatırlatmaları. Senkronda eski/yeni ayna karşılaştırılır (`finishedPlans`). Telegram yalnız 48 saatten yeni mesajları sildirir; eskilerin düğmeleri kaldırılır. Eskimiş "Tamamlandı" düğmesi mesajı kaldırır.
 
 ## 5.4
 

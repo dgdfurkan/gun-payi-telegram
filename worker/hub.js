@@ -1,7 +1,7 @@
 // Durable Object. 'meta' örneği bağlantı kodlarını ve bot ayarını, 'chat:<id>' örnekleri
 // her kullanıcının plan aynasını, olay kuyruğunu ve hatırlatma alarmını tutar.
 import { DurableObject } from 'cloudflare:workers';
-import { jobsFor, cleanItem, cleanPrefs, dayAt, dayAdd, zonedMs, patchOccurrence, occurrence, uid, weekday, toMin, fromMin } from '../web/js/core.js';
+import { jobsFor, cleanItem, cleanPrefs, dayAt, dayAdd, zonedMs, patchOccurrence, occurrence, statusOf, uid, weekday, toMin, fromMin } from '../web/js/core.js';
 import { parse, toItem, parseDurations, parseClock } from '../web/js/parse.js';
 import { tg, send, buttons, esc, HELP, reminderMessage, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
 import { transcribe, aiParse } from './ai.js';
@@ -12,8 +12,8 @@ const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 const randomCode = n => [...crypto.getRandomValues(new Uint8Array(n))].map(x => ABC[x % ABC.length]).join('');
 export const webhookSecret = async env => (await sha('gp-hook:' + env.BOT_TOKEN)).slice(0, 48);
 
-const KEYS = ['auth', 'profile', 'cal', 'events', 'seq', 'sent', 'snooze', 'paused', 'updates', 'lastList', 'digestDay', 'stat', 'tries', 'drafts'];
-const EMPTY = () => ({ auth: [], profile: null, cal: { items: [], prefs: cleanPrefs() }, events: [], seq: 0, sent: {}, snooze: [], paused: false, updates: [], lastList: [], digestDay: '', stat: {}, tries: {}, drafts: {} });
+const KEYS = ['auth', 'profile', 'cal', 'events', 'seq', 'sent', 'snooze', 'paused', 'updates', 'lastList', 'digestDay', 'stat', 'tries', 'drafts', 'msgs'];
+const EMPTY = () => ({ auth: [], profile: null, cal: { items: [], prefs: cleanPrefs() }, events: [], seq: 0, sent: {}, snooze: [], paused: false, updates: [], lastList: [], digestDay: '', stat: {}, tries: {}, drafts: {}, msgs: {} });
 
 export class ReminderHub extends DurableObject {
   constructor(ctx, env) {
@@ -135,12 +135,60 @@ export class ReminderHub extends DurableObject {
     if (!Array.isArray(body.items) || body.items.length > 3000) throw Error('Plan listesi geçersiz.');
     const items = [];
     for (const raw of body.items) { try { items.push(cleanItem(raw)); } catch { /* geçersiz kayıt aynaya alınmaz */ } }
+    const cleanup = this.finishedPlans(s.cal.items, items);
     s.cal = { items, prefs: cleanPrefs(body.prefs || s.cal.prefs) };
     s.events = [];
     s.stat.sync = Date.now();
     await this.save('cal', 'events', 'stat');
     await this.schedule();
+    if (cleanup.length) {
+      const job = (async () => { for (const [id, origin] of cleanup) await this.purge(id, origin); })();
+      if (this.ctx?.waitUntil) this.ctx.waitUntil(job); else await job;
+    }
     return { ok: true, cursor: s.seq, ...this.statusBody() };
+  }
+
+  // ---------- Sohbet temizliği ----------
+  // msgs: { [planId | 'draft:<id>']: [[mesajId, zaman, origin]] }. Plan bitince/silinince mesajları silinir.
+  track(key, mid, origin = '') {
+    if (!mid) return;
+    const list = this.s.msgs[key] || (this.s.msgs[key] = []);
+    if (!list.some(m => m[0] === mid)) list.push([mid, Date.now(), origin]);
+    const old = Date.now() - 7 * 86400000;
+    for (const [k, v] of Object.entries(this.s.msgs)) { const keep = v.filter(m => m[1] > old); if (keep.length) this.s.msgs[k] = keep; else delete this.s.msgs[k]; }
+  }
+  // Telegram yalnız 48 saatten yeni mesajları sildirir; eskiyse düğmeleri kaldırır.
+  async dropMessage(mid, key = '') {
+    if (!mid || !this.chatId) return;
+    if (key && this.s.msgs[key]) this.s.msgs[key] = this.s.msgs[key].filter(m => m[0] !== mid);
+    try { await tg(this.env, 'deleteMessage', { chat_id: this.chatId, message_id: mid }); }
+    catch { await tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: mid, reply_markup: { inline_keyboard: [] } }).catch(() => {}); }
+  }
+  async purge(key, origin = null) {
+    const list = this.s.msgs[key] || [];
+    const hit = origin == null ? list : list.filter(m => m[2] === origin);
+    if (!hit.length) return;
+    const rest = origin == null ? [] : list.filter(m => m[2] !== origin);
+    if (rest.length) this.s.msgs[key] = rest; else delete this.s.msgs[key];
+    await this.save('msgs');
+    for (const [mid] of hit) await this.dropMessage(mid);
+  }
+  // Eski ve yeni plan listesini karşılaştırır: silinen, tamamlanan ya da atlanan gün → [id, origin|null]
+  finishedPlans(before, after) {
+    const out = [], next = new Map(after.map(i => [i.id, i]));
+    for (const old of before) {
+      if (!this.s.msgs[old.id]) continue;
+      const now = next.get(old.id);
+      if (!now) { out.push([old.id, null]); continue; }
+      if (now.repeat === 'none') {
+        if (now.status !== 'pending' && old.status === 'pending') out.push([old.id, null]);
+        continue;
+      }
+      for (const [o, ex] of Object.entries(now.exceptions || {})) {
+        if (ex.status && ex.status !== 'pending' && (old.exceptions?.[o]?.status || 'pending') === 'pending') out.push([old.id, o]);
+      }
+    }
+    return out;
   }
 
   statusBody() {
@@ -234,18 +282,18 @@ export class ReminderHub extends DurableObject {
     if (msg.voice || msg.audio) return this.voice(msg);
     const text = (msg.text || '').trim();
     if (!text) return;
-    if (text.startsWith('/')) return this.command(text);
-    return this.reply(text, false);
+    if (text.startsWith('/')) return this.command(text, msg.message_id);
+    return this.reply(text, false, msg.message_id);
   }
 
   // Serbest metin/ses: hemen eklemez, düğmeli taslak gösterir. Notlar doğrudan kaydedilir.
-  async reply(text, voice) {
+  async reply(text, voice, userMid = 0) {
     const s = this.s, now = Date.now();
     const head = voice ? `🎙 <i>“${esc(text)}”</i>\n\n` : '';
-    for (const [id, d] of Object.entries(s.drafts)) if (d.at < now - 86400000) delete s.drafts[id];
+    for (const [id, d] of Object.entries(s.drafts)) if (d.at < now - 86400000) { delete s.drafts[id]; await this.purge('draft:' + id); }
     // Taslakta bir menü açıksa (Yazı, Gün, Saat, Hatırlat) yazılan metin o alana gider.
     const awaiting = Object.values(s.drafts).filter(d => d.await && d.at > now - 30 * 60000).sort((a, b) => b.at - a.at)[0];
-    if (awaiting) return this.applyTyped(awaiting, text, voice);
+    if (awaiting) return this.applyTyped(awaiting, text, voice, userMid);
     // Açık taslak varken yalnız zaman bilgisi yazılırsa ("yarın 10'da") taslağı düzelt.
     const rule = parse(text, { now, tz: this.tz });
     const open = Object.values(s.drafts).filter(d => d.at > now - 30 * 60000).sort((a, b) => b.at - a.at)[0];
@@ -257,7 +305,8 @@ export class ReminderHub extends DurableObject {
       if (f.time) { it.time = rule.time; it.endTime = rule.endTime; if (!it.date) it.date = rule.date || dayAt(now, this.tz); }
       if (f.reminders) it.reminders = rule.reminders;
       open.item = cleanItem(it);
-      await tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: open.mid, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      this.track('draft:' + open.id, userMid);
+      await this.dropMessage(open.mid, 'draft:' + open.id);
       open.voice = voice ? text : open.voice;
       return this.showDraft(open, 'main', true);
     }
@@ -273,14 +322,16 @@ export class ReminderHub extends DurableObject {
       if (!r.title) throw Error('Ne ekleyeceğimi anlayamadım.');
       const draft = { id: uid(), item: cleanItem(toItem(r)), at: now, voice: voice ? text : '', ai, mid: 0 };
       s.drafts[draft.id] = draft;
+      this.track('draft:' + draft.id, userMid);
       await this.showDraft(draft, 'main', true);
     } catch (e) {
       await send(this.env, this.chatId, `${head}${esc(e.message)}\n\nÖrnek: <i>Yarın 9'da spor</i>`);
     }
   }
 
-  async applyTyped(d, text, voice) {
+  async applyTyped(d, text, voice, userMid = 0) {
     const it = { ...d.item }, now = Date.now(), tz = this.tz, today = dayAt(now, tz);
+    this.track('draft:' + d.id, userMid);
     let err = '';
     if (d.await === 'title') {
       const t = text.trim().replace(/\s+/g, ' ').slice(0, 300);
@@ -300,12 +351,18 @@ export class ReminderHub extends DurableObject {
       else err = 'Tarihi anlayamadım. Örnek: <i>20 Aralık</i>, <i>20 Aralık 2027</i>, <i>haftaya cuma</i>';
       if (!err && r.found?.time) { it.time = r.time; it.endTime = r.endTime; }
     }
-    if (err) { d.at = now; await this.save('drafts'); return send(this.env, this.chatId, `${err}\n<i>Menüden çıkmak için taslaktaki ← Geri.</i>`); }
+    if (err) {
+      d.at = now;
+      const m = await send(this.env, this.chatId, `${err}\n<i>Menüden çıkmak için taslaktaki ← Geri.</i>`);
+      this.track('draft:' + d.id, m?.message_id);
+      await this.save('drafts', 'msgs');
+      return;
+    }
     try { d.item = cleanItem(it); } catch (e) { return send(this.env, this.chatId, esc(e.message)); }
     d.await = null;
     d.at = now;
     if (voice) d.voice = text;
-    await tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: d.mid, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    await this.dropMessage(d.mid, 'draft:' + d.id);
     return this.showDraft(d, 'main', true);
   }
 
@@ -314,10 +371,11 @@ export class ReminderHub extends DurableObject {
     if (fresh || !draft.mid) {
       const m = await send(this.env, this.chatId, view.text, view.markup);
       draft.mid = m?.message_id || 0;
+      this.track('draft:' + draft.id, draft.mid);
     } else {
       await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: draft.mid, text: view.text, parse_mode: 'HTML', reply_markup: view.markup }).catch(() => {});
     }
-    await this.save('drafts');
+    await this.save('drafts', 'msgs');
   }
 
   // Taslak düğmeleri: x:<id>:<işlem>:<değer>
@@ -327,7 +385,7 @@ export class ReminderHub extends DurableObject {
     const d = s.drafts[id];
     if (!d) {
       await answer('Bu taslağın süresi doldu');
-      return tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      return this.dropMessage(cb.message.message_id);
     }
     d.mid = cb.message.message_id;
     d.at = now;
@@ -337,16 +395,23 @@ export class ReminderHub extends DurableObject {
       s.cal.items.push(item);
       this.pushEvent({ type: 'add', item });
       delete s.drafts[id];
-      await this.save('cal', 'events', 'seq', 'drafts');
+      // Sohbet sade kalsın: senin mesajın, düzeltmeler ve ara cevaplar silinir; plan başına tek kart kalır.
+      const extra = (s.msgs['draft:' + id] || []).filter(m => m[0] !== d.mid);
+      delete s.msgs['draft:' + id];
+      this.track(item.id, d.mid);
+      await this.save('cal', 'events', 'seq', 'drafts', 'msgs');
       await this.schedule();
       await answer('Eklendi ✓');
-      return tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: addedMessage(item, today, false), parse_mode: 'HTML', reply_markup: buttons([[['↩︎ Geri al', `u:${item.id}`]]]) }).catch(() => {});
+      await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: addedMessage(item, today, false), parse_mode: 'HTML', reply_markup: buttons([[['↩︎ Geri al', `u:${item.id}`]]]) }).catch(() => {});
+      for (const [mid] of extra) await this.dropMessage(mid);
+      return;
     }
     if (op === 'no') {
       delete s.drafts[id];
+      this.track('draft:' + id, d.mid);
       await this.save('drafts');
       await answer('Vazgeçildi');
-      return tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: `✖️ <s>${esc(it.title)}</s>`, parse_mode: 'HTML' }).catch(() => {});
+      return this.purge('draft:' + id);
     }
     let mode = 'main';
     d.await = null;
@@ -394,13 +459,13 @@ export class ReminderHub extends DurableObject {
       if (!res.ok) throw Error('Ses dosyası alınamadı.');
       const text = await transcribe(this.env, await res.arrayBuffer());
       if (!text) return send(this.env, this.chatId, 'Sesi anlayamadım, tekrar dener misin?');
-      return this.reply(text, true);
+      return this.reply(text, true, msg.message_id);
     } catch (e) {
       return send(this.env, this.chatId, `Sesli mesaj çözülemedi: ${esc(e.message)}`);
     }
   }
 
-  async command(text) {
+  async command(text, userMid = 0) {
     const s = this.s, now = Date.now(), today = dayAt(now, this.tz);
     const [raw, ...rest] = text.split(/\s+/);
     const cmd = raw.split('@')[0].toLocaleLowerCase('tr').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ı/g, 'i');
@@ -428,8 +493,12 @@ export class ReminderHub extends DurableObject {
       const n = parseInt(arg, 10);
       const ref = s.lastList[n - 1];
       if (!ref) return send(this.env, this.chatId, 'Önce /bugun yaz, sonra /tamam 1 gibi numara ver.');
+      const item = s.cal.items.find(x => x.id === ref[0]);
       const title = await this.markDone(ref[0], ref[1]);
-      return send(this.env, this.chatId, title ? `✓ <s>${esc(title)}</s>` : 'Plan bulunamadı.');
+      if (!title) return send(this.env, this.chatId, 'Plan bulunamadı.');
+      await this.dropMessage(userMid);
+      await this.purge(ref[0], item?.repeat === 'none' ? null : ref[1]);
+      return tg(this.env, 'sendMessage', { chat_id: this.chatId, text: `✓ <s>${esc(title)}</s>`, parse_mode: 'HTML', disable_notification: true }).catch(() => {});
     }
     if (cmd === '/not') return arg ? this.reply('not: ' + arg, false) : send(this.env, this.chatId, '/not ile birlikte notunu yaz.');
     if (cmd === '/duraklat') { s.paused = true; await this.save('paused'); await this.schedule(); return send(this.env, this.chatId, 'Hatırlatmalar durdu. Açmak için /devam'); }
@@ -455,10 +524,14 @@ export class ReminderHub extends DurableObject {
     const answer = text => tg(this.env, 'answerCallbackQuery', { callback_query_id: cb.id, text }).catch(() => {});
     const edit = text => tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: cb.message.message_id, text, parse_mode: 'HTML' }).catch(() => {});
     if (k === 'd') {
-      const title = await this.markDone(a, b);
-      await answer(title ? 'Tamamlandı ✓' : 'Plan bulunamadı');
-      if (title) await edit(`✓ <s>${esc(title)}</s>`);
-      return;
+      const item = s.cal.items.find(x => x.id === a);
+      if (!item) { await answer('Bu plan artık yok'); return this.dropMessage(cb.message.message_id); }
+      const already = statusOf(item, b) === 'done';
+      if (!already) await this.markDone(a, b);
+      await answer(already ? 'Zaten tamamlanmış' : 'Tamamlandı ✓');
+      const origin = item.repeat === 'none' ? '' : b;
+      this.track(a, cb.message.message_id, origin);
+      return this.purge(a, item.repeat === 'none' ? null : b);
     }
     if (k === 'z') {
       const item = s.cal.items.find(x => x.id === a);
@@ -479,7 +552,8 @@ export class ReminderHub extends DurableObject {
       await this.save('cal', 'events', 'seq');
       await this.schedule();
       await answer('Geri alındı');
-      return edit(`↩︎ <s>${esc(item?.title || 'Plan')}</s> geri alındı`);
+      this.track(a, cb.message.message_id);
+      return this.purge(a);
     }
     if (k === 'un') {
       this.pushEvent({ type: 'removeNote', id: a });
@@ -538,9 +612,10 @@ export class ReminderHub extends DurableObject {
     if (s.paused || !s.profile) return;
     const chat = s.profile.chatId;
     let failed = false;
-    const deliver = async (key, text, markup) => {
+    const deliver = async (key, text, markup, itemId = '', origin = '') => {
       try {
-        await send(this.env, chat, text, markup);
+        const m = await send(this.env, chat, text, markup);
+        if (itemId) this.track(itemId, m?.message_id, origin);
         s.sent[key] = now;
         s.stat.send = now;
         s.stat.error = '';
@@ -554,12 +629,14 @@ export class ReminderHub extends DurableObject {
     };
     const due = jobsFor(s.cal.items, s.cal.prefs, now, 1).filter(j => j.due <= now + 5000 && !s.sent[j.id]);
     for (const j of due.slice(0, 20)) {
-      await deliver(j.id, reminderMessage(j, now), buttons([[['✓ Tamamlandı', `d:${j.itemId}:${j.origin}`], ['⏱ 10 dk', `z:${j.itemId}:${j.origin}:10`]]]));
+      const rep = s.cal.items.find(i => i.id === j.itemId)?.repeat !== 'none';
+      await deliver(j.id, reminderMessage(j, now), buttons([[['✓ Tamamlandı', `d:${j.itemId}:${j.origin}`], ['⏱ 10 dk', `z:${j.itemId}:${j.origin}:10`]]]), j.itemId, rep ? j.origin : '');
     }
     const ready = s.snooze.filter(z => z.due <= now + 5000);
     for (const z of ready) {
       const text = z.test ? '🔔 <b>Deneme hatırlatması</b>\nUygulama kapalıyken de buraya gelir.' : reminderMessage({ title: z.title, time: z.time || '', start: z.start ?? now }, now);
-      await deliver('z:' + z.id, text, z.itemId ? buttons([[['✓ Tamamlandı', `d:${z.itemId}:${z.origin}`], ['⏱ 10 dk', `z:${z.itemId}:${z.origin}:10`]]]) : undefined);
+      const zr = z.itemId && s.cal.items.find(i => i.id === z.itemId)?.repeat !== 'none';
+      await deliver('z:' + z.id, text, z.itemId ? buttons([[['✓ Tamamlandı', `d:${z.itemId}:${z.origin}`], ['⏱ 10 dk', `z:${z.itemId}:${z.origin}:10`]]]) : undefined, z.itemId || '', zr ? z.origin : '');
       if (s.sent['z:' + z.id]) s.snooze = s.snooze.filter(x => x.id !== z.id);
     }
     const dg = this.nextDigest(now);
@@ -569,7 +646,7 @@ export class ReminderHub extends DurableObject {
       if (s.sent['digest:' + today]) s.digestDay = today;
     }
     for (const [k, t] of Object.entries(s.sent)) if (t < now - 3 * 86400000) delete s.sent[k];
-    await this.save('sent', 'snooze', 'digestDay', 'stat', 'tries');
+    await this.save('sent', 'snooze', 'digestDay', 'stat', 'tries', 'msgs');
     await this.schedule(failed ? 60000 : 1000);
   }
 }
