@@ -1,4 +1,4 @@
-name: Validate full Gun Payi project
+name: Doğrula
 on:
   push:
     branches: [main]
@@ -19,11 +19,11 @@ jobs:
         with:
           node-version-file: ".node-version"
           cache: npm
-      - name: Install locked dependencies
+      - name: Bağımlılıklar
         run: npm ci --no-audit --no-fund
-      - name: Validate JavaScript
+      - name: Sözdizimi
         run: npm run check
-      - name: Test agenda, backups, voice, updates and Telegram alarms
+      - name: Testler (çözümleyici, uygulama, Worker)
         run: npm test
-      - name: Check Cloudflare bundle and bindings
-        run: npx wrangler deploy --dry-run --outdir /tmp/gun-payi-worker-check
+      - name: Cloudflare paketleme denemesi
+        run: npx wrangler deploy --dry-run --outdir /tmp/gun-payi-check
