@@ -1,0 +1,36 @@
+// Yerel geliştirme: Workers AI uzaktan bağlantı istediği için burada kapalı.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gun-payi-telegram",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-11-16",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*",
+      "/telegram/*",
+      "/health"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HUB",
+        "class_name": "ReminderHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "ReminderHub"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  }
+}

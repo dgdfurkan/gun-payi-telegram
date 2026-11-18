@@ -1,17 +1,16 @@
 {
-  "name": "gun-payi-telegram",
-  "version": "1.0.0",
+  "name": "gun-payi",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs",
+    "dev": "wrangler dev -c wrangler.dev.jsonc",
+    "test": "node --import ./tests/helpers/cf.mjs --test tests/*.test.mjs",
     "check": "node scripts/check-syntax.mjs",
-    "deploy": "wrangler deploy",
-    "test:web": "node --test tests/backup.test.mjs tests/core.test.mjs tests/dictation.test.mjs tests/microphone-icons.test.mjs tests/reminders.test.mjs tests/reopen.test.mjs tests/sw.test.mjs tests/telegram.test.mjs tests/updates.test.mjs",
-    "test:service": "node --test tests/service.test.mjs"
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "4.163.0"

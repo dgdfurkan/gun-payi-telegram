@@ -1,11 +1,17 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // Uygulama (web/) ve API aynı Worker'da, aynı adreste çalışır.
   "name": "gun-payi-telegram",
-  "main": "telegram-worker/worker.mjs",
+  "main": "worker/index.js",
   "compatibility_date": "2026-11-16",
   "workers_dev": true,
-  "vars": {
-    "ALLOWED_ORIGIN": "https://gun-payi.gunduz.chatgpt.site"
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/telegram/*", "/health"]
+  },
+  "ai": {
+    "binding": "AI"
   },
   "durable_objects": {
     "bindings": [
