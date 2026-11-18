@@ -10,7 +10,7 @@ import { link, aiParse, sync } from './api.js';
 import { catOf } from './categories.js';
 import { calendarHTML, shiftMonth, quickDays, wheelHTML, bindWheel, reminderHTML, handleCustom, toggleReminder, repeatHTML, applyRepeat, toggleWeekday, tile, iconGridHTML } from './pickers.js';
 
-const EXAMPLES = ["Her cuma 12'de babaannemi ara", "Yarın 9'da spor, 10 dk önce", 'Hafta içi 07:30 ilaç', 'Ekmek al'];
+const EXAMPLES = [["Her cuma 12'de babaannemi ara", 'phone'], ["Yarın 9'da spor, 10 dk önce", 'run'], ['Hafta içi 07:30 ilaç', 'pill'], ['Her gün 21:00 kitap oku', 'book'], ['Ekmek al', 'cart']];
 const whenLabel = (p, t) => (p.repeat !== 'none' ? repeatLabel(p) : p.date ? dayLabel(p.date, t) : 'Yapılacaklar');
 const longDate = (d, t) => { const l = dayLabel(d, t); return /^(Bugün|Yarın|Dün)$/.test(l) ? `${l}, ${shortDate(d)}` : `${shortDate(d)} ${DAY_NAMES[weekday(d)]}`; };
 
@@ -26,11 +26,11 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       <div class="cmp-field"><textarea rows="1" enterkeyhint="done" autocapitalize="sentences" autocomplete="off" placeholder="${kind === 'note' ? 'Aklındakini yaz…' : 'Ne yapacaksın?'}"></textarea></div>
       <div class="cmp-pv"></div>
       <div class="picker" hidden></div>
-      <div class="cmp-ex">${EXAMPLES.map(e => `<button type="button" data-ex="${esc(e)}">${esc(e)}</button>`).join('')}</div>
+      <div class="cmp-ex"><div class="cmp-ex-h">${icon('sparkle')}Hızlı öneriler</div><div class="chips-row">${EXAMPLES.map(([e, g]) => `<button type="button" data-ex="${esc(e)}">${icon(g)}${esc(e)}</button>`).join('')}</div></div>
       <div class="cmp-bar">
         ${voiceSupported() ? `<button type="button" class="mic-big" aria-label="Konuş">${icon('mic')}</button>` : ''}
         <div class="cmp-status"><b>${voiceSupported() ? 'Dokun ve konuş' : 'Yaz ve ekle'}</b><span>“Her cuma 12’de babaannemi ara”</span></div>
-        <button type="button" class="add-btn" disabled>Ekle</button>
+        <button type="button" class="add-btn" disabled>Ekle${icon('up')}</button>
       </div>
     </div>`,
     onClose: () => abortDictation(),

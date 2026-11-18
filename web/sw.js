@@ -1,9 +1,10 @@
 // Uygulama kabuğunu önbellekler; kişisel veri IndexedDB'de kalır, burada silinmez.
-const VERSION = '5.1.1';
+const VERSION = '5.2.0';
 const CACHE = 'gp-' + VERSION;
+const FONTS = 'gp-fonts';
 const SHELL = [
   '/', '/app.css', '/manifest.webmanifest',
-  '/js/app.js', '/js/api.js', '/js/categories.js', '/js/compose.js', '/js/core.js', '/js/ctx.js', '/js/icons.js', '/js/pages.js',
+  '/js/app.js', '/js/api.js', '/js/categories.js', '/js/chrome.js', '/js/compose.js', '/js/core.js', '/js/ctx.js', '/js/icons.js', '/js/pages.js',
   '/js/parse.js', '/js/pickers.js', '/js/plan.js', '/js/store.js', '/js/ui.js', '/js/version.js', '/js/voice.js',
   '/icons/icon-192.png', '/icons/apple-touch-icon.png',
 ];
@@ -27,7 +28,7 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k !== CACHE) await caches.delete(k);
+    for (const k of await caches.keys()) if (k !== CACHE && k !== FONTS) await caches.delete(k);
     await self.clients.claim();
   })());
 });
@@ -35,7 +36,20 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   const url = new URL(req.url);
-  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  if (req.method !== 'GET') return;
+  // Yazı tipi (Google Fonts): bir kez indir, sonra çevrimdışı da kullan.
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+    e.respondWith((async () => {
+      const cache = await caches.open(FONTS);
+      const hit = await cache.match(req);
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res.ok || res.type === 'opaque') cache.put(req, res.clone());
+      return res;
+    })());
+    return;
+  }
+  if (url.origin !== location.origin) return;
   if (/^\/(api|telegram)\//.test(url.pathname) || url.pathname === '/health' || url.pathname.endsWith('.shortcut')) return;
   if (req.mode === 'navigate') {
     e.respondWith((async () => (await caches.match('/', { cacheName: CACHE })) || clean(await fetch(req)))());

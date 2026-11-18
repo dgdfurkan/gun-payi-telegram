@@ -3,7 +3,7 @@ import { load, get, subscribe, commit } from './store.js';
 import * as api from './api.js';
 import { ctx, today } from './ctx.js';
 import { icon } from './icons.js';
-import { $, $$, esc, haptic, applyTheme } from './ui.js';
+import { $, $$, esc, haptic, applyTheme, reduced } from './ui.js';
 import { renderPlan, planActs, bindSwipe } from './plan.js';
 import { openCompose, openItem } from './compose.js';
 import { renderNotes, renderReview, renderSettings, pageActs, onInput, onChange, prepareLink, linkState, watchLink, checkLinkNow, refreshStatus } from './pages.js';
@@ -24,7 +24,7 @@ function shell() {
   }
   bindSwipe(views.plan);
 }
-const stick = v => v.querySelector('.topbar')?.classList.toggle('stuck', v.scrollTop > 36);
+const stick = v => v.querySelector('.appbar')?.classList.toggle('stuck', v.scrollTop > 4);
 
 function render() {
   const v = views[ctx.tab];
@@ -65,7 +65,7 @@ document.addEventListener('click', e => {
   if (act === 'add') {
     haptic();
     const day = t.dataset.day || (ctx.tab === 'plan' && ctx.day && ctx.day !== today() ? ctx.day : '');
-    openCompose({ day, kind: ctx.tab === 'notes' ? 'note' : 'plan' });
+    openCompose({ day, text: t.dataset.text || '', kind: ctx.tab === 'notes' ? 'note' : 'plan' });
     return;
   }
   if (act === 'open') { haptic(); openItem(t.dataset.id, t.dataset.origin); return; }
@@ -137,11 +137,19 @@ const welcomeActs = {
   'w-tg': () => { watchLink(); setTimeout(paintWelcome, 400); },
   'w-done': async () => { await checkLinkNow(); finishWelcome(); },
 };
+// Açılış animasyonu en az bir tur oynasın, sonra yumuşakça kaybolsun.
+function hideSplash() {
+  const el = document.getElementById('splash');
+  if (!el) return;
+  const wait = reduced() ? 0 : Math.max(0, 1250 - performance.now());
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 500); }, wait);
+}
+
 // --- açılış ---
 (async () => {
   await load();
   const s = get();
-  applyTheme(s.prefs.theme);
+  applyTheme(s.prefs.color, s.prefs.mode);
   ctx.mode = s.prefs.plannerMode;
   ctx.day = today();
   shell();
@@ -149,6 +157,7 @@ const welcomeActs = {
   subscribe(() => render());
   api.onLinkChange(() => { render(); if (welcomeEl && api.link()) finishWelcome(); });
   if (!s.onboarded) welcome();
+  hideSplash();
   api.sync(true).then(r => { if (r) render(); });
   if ('serviceWorker' in navigator) {
     if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));

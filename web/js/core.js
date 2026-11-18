@@ -1,7 +1,10 @@
 // Ortak çekirdek: tarih, tekrar, hatırlatma ve doğrulama. Hem uygulama hem Worker kullanır.
 
 export const TZ_DEFAULT = 'Europe/Istanbul';
-export const THEMES = ['light', 'dark', 'system', 'mor', 'yesil', 'mavi', 'gunbatimi'];
+export const COLORS = ['yesil', 'indigo', 'mor', 'mavi', 'gunbatimi'];
+export const MODES = ['light', 'dark', 'system'];
+// Eski tek değerli tema (5.0–5.1) → renk + mod
+const LEGACY = { light: ['indigo', 'light'], dark: ['indigo', 'dark'], system: ['indigo', 'system'], mor: ['mor', 'light'], yesil: ['yesil', 'light'], mavi: ['mavi', 'light'], gunbatimi: ['gunbatimi', 'light'] };
 export const DAY_NAMES = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 export const DAY_SHORT = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 export const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
@@ -260,6 +263,7 @@ export function cleanPrefs(raw = {}) {
     plannerMode: ['day', 'week', 'month'].includes(raw.plannerMode) ? raw.plannerMode : 'day',
     digest: { on: Boolean(raw.digest?.on), time: isTime(raw.digest?.time) ? raw.digest.time : '08:00' },
     reviewDay: Number.isInteger(raw.reviewDay) && raw.reviewDay >= 0 && raw.reviewDay <= 6 ? raw.reviewDay : 0,
-    theme: THEMES.includes(raw.theme) ? raw.theme : 'light',
+    color: COLORS.includes(raw.color) ? raw.color : (LEGACY[raw.theme]?.[0] || 'yesil'),
+    mode: MODES.includes(raw.mode) ? raw.mode : (LEGACY[raw.theme]?.[1] || 'light'),
   };
 }

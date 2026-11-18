@@ -5,22 +5,30 @@ import { icon } from './icons.js';
 import { esc, haptic, toast } from './ui.js';
 import { ctx, today, tz } from './ctx.js';
 import { sync } from './api.js';
-import { catOf } from './categories.js';
+import { catOf, CATS } from './categories.js';
 import { tile } from './pickers.js';
+import { appbar, hero, statusChip } from './chrome.js';
 
 const fullDate = d => { const [, m, dd] = d.split('-').map(Number); return `${dd} ${MONTHS[m - 1]} ${DAY_NAMES[weekday(d)]}`; };
+const STARTERS = [['Kısa yürüyüş', 'run', 'Bugün 18:00 kısa yürüyüş'], ['Kitap oku', 'book', 'Bugün 21:00 kitap oku'], ['Su iç', 'drop', 'Her gün 10:00 su iç'], ['Ailemi ara', 'phone', 'Bugün 20:00 ailemi ara']];
+function isoWeek(day) {
+  const d = new Date(day + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7));
+  const y = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  return 1 + Math.round(((d - y) / 86400000 - 3 + ((y.getUTCDay() + 6) % 7)) / 7);
+}
 
-export function itemRow(o, t, { showDate = false } = {}) {
+export function itemRow(o, t, { stripe = false } = {}) {
   const s = get();
   const done = o.status === 'done';
-  const meta = [];
-  if (showDate && o.date) meta.push(`<span>${icon('cal')}${esc(dayLabel(o.date, t))}</span>`);
-  if (o.repeat !== 'none') meta.push(`<span>${icon('repeat')}${esc(repeatLabel(o))}</span>`);
+  const key = catOf(o);
+  const tags = [];
   if (o.time) {
     const rem = o.reminders ?? s.prefs.reminderDefaults;
-    if (rem.length) meta.push(`<span>${icon('bell')}${esc(remindersLabel(rem))}</span>`);
+    if (rem.length) tags.push(`<span class="tag">${icon('bell')}${esc(remindersLabel(rem))}</span>`);
   }
-  if (o.note) meta.push(`<span>${icon('notes')}Not</span>`);
+  if (o.repeat !== 'none') tags.push(`<span class="tag">${icon('repeat')}${esc(repeatLabel(o))}</span>`);
+  if (o.note) tags.push(`<span class="tag">${icon('notes')}Not</span>`);
   let cls = done ? 'done' : '';
   if (o.date === t && o.time && !done) {
     const now = clockAt(Date.now(), tz()).minutes, start = toMin(o.time), end = o.endTime ? toMin(o.endTime) : start + 30;
@@ -29,11 +37,13 @@ export function itemRow(o, t, { showDate = false } = {}) {
   }
   if (ctx.pop === `${o.id}:${o.origin || ''}`) cls += ' pop';
   if (ctx.enter === o.id) cls += ' enter';
-  return `<div class="item ${cls}" data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}">
+  if (stripe) cls += ' stripe';
+  const color = CATS[key]?.color;
+  return `<div class="task ${cls}" ${color ? `style="--c:${color}"` : ''} data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}">
     <button type="button" class="check" data-act="toggle" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}" aria-label="${done ? 'Geri al' : 'Tamamla'}">${icon('check')}</button>
-    ${tile(catOf(o))}
-    <div class="item-main"><div class="item-title">${esc(o.title)}</div>${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}</div>
-    ${o.time ? `<div class="item-time">${o.time}${o.endTime ? `<small>${o.endTime}</small>` : ''}</div>` : ''}
+    ${tile(key)}
+    <div class="task-main"><div class="task-title">${esc(o.title)}</div>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
+    ${o.time ? `<span class="time-pill">${o.time}${o.endTime ? `<small>${o.endTime}</small>` : ''}</span>` : ''}
   </div>`;
 }
 
@@ -50,31 +60,41 @@ function strip(sel, t) {
   return `<div class="strip-wrap"><button type="button" data-act="shift" data-n="-7" aria-label="Önceki hafta">${icon('chevL')}</button><div class="strip" data-swipe="week">${html}</div><button type="button" data-act="shift" data-n="7" aria-label="Sonraki hafta">${icon('chevR')}</button></div>`;
 }
 
+function emptyDay(day, t) {
+  const isToday = day === t;
+  return `<div class="empty-hero"><i class="aura a1"></i><i class="aura a2"></i>
+      <div class="sun"><span>${icon(isToday ? 'sun' : 'cal')}</span></div>
+      <h3>${isToday ? 'Bugün boş' : 'Plan yok'}</h3>
+      <p>${isToday ? 'Güne yer açık. Rahatla ya da yeni bir plan ekle.' : esc(fullDate(day)) + ' için henüz bir şey yok.'}</p>
+      <button type="button" class="pill-primary" data-act="add" data-day="${day}">${icon('plus')}Plan ekle</button></div>
+    <div class="starters"><span class="kicker">Hızlı başla</span><div class="chips-row">${STARTERS.map(([l, g, txt]) => `<button type="button" class="starter" data-act="add" data-text="${esc(txt)}">${icon(g)}${l}</button>`).join('')}</div></div>`;
+}
+
 function dayBody(day, t) {
   const s = get();
   const list = itemsOn(s.items, day);
-  let html = '';
-  if (list.length) html += `<div class="list">${list.map(o => itemRow(o, t)).join('')}</div>`;
   const inbox = day === t ? s.items.filter(i => !i.date && (i.status === 'pending' || ctx.pop === `${i.id}:`)) : [];
-  if (!list.length && !inbox.length) {
-    html += `<div class="empty"><div class="em-ic">${icon(day === t ? 'sun' : 'cal')}</div><b>${day === t ? 'Bugün boş' : 'Plan yok'}</b>${day === t ? 'Güne yer açık.' : esc(fullDate(day))}<br><button type="button" data-act="add" data-day="${day}">+ Plan ekle</button></div>`;
+  let html = '';
+  if (list.length) {
+    const done = list.filter(o => o.status === 'done').length;
+    html += `<div class="progress"><div class="progress-h"><span>Günlük ilerleme</span><b>${done} / ${list.length} tamamlandı</b></div><div class="track"><i style="width:${Math.round((done / list.length) * 100)}%"></i></div></div>
+      <div class="sec-h"><h3>Planlar</h3><span>${list.length} plan</span></div>
+      <div class="tasks">${list.map(o => itemRow(o, t)).join('')}</div>`;
   }
-  if (inbox.length) {
-    html += `<div class="section-h big">Yapılacaklar<small style="font-size:15px;color:var(--label-2);font-weight:400">${inbox.length}</small></div>`;
-    html += `<div class="list">${inbox.map(i => itemRow({ ...i, origin: '' }, t)).join('')}</div>`;
-  }
+  if (!list.length && !inbox.length) html += emptyDay(day, t);
+  if (inbox.length) html += `<div class="sec-h"><h3>Yapılacaklar</h3><span>${inbox.length} iş</span></div><div class="tasks">${inbox.map(i => itemRow({ ...i, origin: '' }, t)).join('')}</div>`;
   return html;
 }
 
 function weekBody(sel, t) {
   const s = get();
-  const mon = mondayOf(sel);
-  let html = `<div class="month-h"><b>${+mon.slice(8)} ${MONTHS[+mon.slice(5, 7) - 1].slice(0, 3)} – ${+dayAdd(mon, 6).slice(8)} ${MONTHS[+dayAdd(mon, 6).slice(5, 7) - 1].slice(0, 3)}</b><div><button type="button" data-act="shift" data-n="-7" aria-label="Önceki hafta">${icon('chevL')}</button><button type="button" data-act="shift" data-n="7" aria-label="Sonraki hafta">${icon('chevR')}</button></div></div>`;
+  const mon = mondayOf(sel), sun = dayAdd(mon, 6);
+  let html = `<div class="week-nav"><b>${+mon.slice(8)} ${MONTHS[+mon.slice(5, 7) - 1]} – ${+sun.slice(8)} ${MONTHS[+sun.slice(5, 7) - 1]}</b><div class="round-nav"><button type="button" data-act="shift" data-n="-7" aria-label="Önceki hafta">${icon('chevL')}</button><button type="button" data-act="shift" data-n="7" aria-label="Sonraki hafta">${icon('chevR')}</button></div></div>`;
   for (let i = 0; i < 7; i++) {
     const d = dayAdd(mon, i);
     const list = itemsOn(s.items, d);
     html += `<div class="wday"><div class="wday-h ${d === t ? 'today' : ''}">${DAY_NAMES[weekday(d)]}<small>${+d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1]}${d === t ? ' · Bugün' : ''}</small></div>`;
-    html += list.length ? `<div class="list">${list.map(o => itemRow(o, t)).join('')}</div>` : `<button type="button" class="wday-empty" data-act="add" data-day="${d}" style="width:calc(100% - 32px);text-align:left">Boş · ekle</button>`;
+    html += list.length ? `<div class="tasks">${list.map(o => itemRow(o, t)).join('')}</div>` : `<button type="button" class="wday-empty" data-act="add" data-day="${d}">+ Boş · plan ekle</button>`;
     html += '</div>';
   }
   return html;
@@ -85,43 +105,51 @@ function monthBody(sel, t) {
   const [y, m] = (ctx.month || sel.slice(0, 7)).split('-').map(Number);
   const first = `${y}-${pad(m)}-01`;
   const start = mondayOf(first);
-  const days = monthDays(y, m - 1);
-  const cells = Math.ceil((daysBetween(start, first) + days) / 7) * 7;
-  let grid = DAY_SHORT.slice(1).concat(DAY_SHORT[0]).map(d => `<div class="wd">${d}</div>`).join('');
+  const cells = Math.ceil((daysBetween(start, first) + monthDays(y, m - 1)) / 7) * 7;
+  let grid = [1, 2, 3, 4, 5, 6, 0].map(d => `<span class="wd ${d === 6 || d === 0 ? 'we' : ''}">${DAY_SHORT[d]}</span>`).join('');
   for (let i = 0; i < cells; i++) {
     const d = dayAdd(start, i);
     const out = d.slice(0, 7) !== first.slice(0, 7);
-    const has = !out && itemsOn(s.items, d).length > 0;
-    grid += `<button type="button" class="day ${out ? 'out' : ''} ${d === sel ? 'sel' : ''} ${d === t ? 'today' : ''} ${has ? 'has' : ''}" data-act="pick-day" data-day="${d}"><span class="dd">${+d.slice(8)}</span><span class="dot"></span></button>`;
+    const dots = out ? [] : [...new Set(itemsOn(s.items, d).map(o => CATS[catOf(o)]?.color || ''))].slice(0, 3);
+    grid += `<button type="button" class="mday ${out ? 'out' : ''} ${d === sel ? 'sel' : ''} ${d === t ? 'today' : ''}" data-act="pick-day" data-day="${d}"><span class="dd">${+d.slice(8)}</span><span class="dots">${dots.map(c => `<i ${c ? `style="--c:${c}"` : ''}></i>`).join('')}</span></button>`;
   }
-  return `<div class="month-h"><b>${MONTHS[m - 1]} ${y}</b><div><button type="button" data-act="month" data-n="-1" aria-label="Önceki ay">${icon('chevL')}</button><button type="button" data-act="month" data-n="1" aria-label="Sonraki ay">${icon('chevR')}</button></div></div>
-    <div class="mgrid" data-swipe="month">${grid}</div>
-    <div class="section-h">${esc(dayLabel(sel, t))} · ${esc(fullDate(sel))}</div>${dayBody(sel, t)}`;
+  const list = itemsOn(s.items, sel);
+  return `<div class="cal-card"><div class="cal-top"><div><h3>${MONTHS[m - 1]} ${y}</h3><span class="badge">${isoWeek(sel)}. hafta</span></div>
+      <div class="round-nav"><button type="button" data-act="month" data-n="-1" aria-label="Önceki ay">${icon('chevL')}</button><button type="button" data-act="month" data-n="1" aria-label="Sonraki ay">${icon('chevR')}</button></div></div>
+      <div class="mgrid" data-swipe="month">${grid}</div></div>
+    <div class="agenda-h"><div><h4>${esc(dayLabel(sel, t))} · ${esc(fullDate(sel))}</h4></div><span class="badge-p">${list.length} plan</span></div>
+    ${list.length ? `<div class="tasks">${list.map(o => itemRow(o, t, { stripe: true })).join('')}</div>` : `<button type="button" class="wday-empty" data-act="add" data-day="${sel}">+ Bu güne plan ekle</button>`}`;
 }
 
 export function renderPlan() {
   const t = today();
   if (!ctx.day) ctx.day = t;
   const sel = ctx.day;
-  const title = ctx.mode === 'day' ? dayLabel(sel, t) : ctx.mode === 'week' ? 'Bu hafta' : 'Takvim';
-  const weekTitle = ctx.mode === 'week' && mondayOf(sel) !== mondayOf(t) ? (daysBetween(mondayOf(t), mondayOf(sel)) === 7 ? 'Gelecek hafta' : daysBetween(mondayOf(t), mondayOf(sel)) === -7 ? 'Geçen hafta' : 'Hafta') : title;
-  const sub = ctx.mode === 'day' ? fullDate(sel) : greeting();
+  let kicker, title;
+  if (ctx.mode === 'day') {
+    const rel = dayLabel(sel, t);
+    kicker = /^(Bugün|Yarın|Dün)$/.test(rel) ? `${rel} · ${DAY_NAMES[weekday(sel)]}` : DAY_NAMES[weekday(sel)];
+    const [y, m, dd] = sel.split('-').map(Number);
+    title = `${dd} ${MONTHS[m - 1]}${y !== +t.slice(0, 4) ? ' ' + y : ''}`;
+  } else if (ctx.mode === 'week') {
+    const diff = daysBetween(mondayOf(t), mondayOf(sel));
+    kicker = diff === 0 ? 'Bu hafta' : diff === 7 ? 'Gelecek hafta' : diff === -7 ? 'Geçen hafta' : 'Hafta';
+    title = `${isoWeek(sel)}. hafta`;
+  } else {
+    kicker = 'Takvim';
+    const [y, m] = (ctx.month || sel.slice(0, 7)).split('-').map(Number);
+    const n = Array.from({ length: monthDays(y, m - 1) }, (_, i) => itemsOn(get().items, `${y}-${pad(m)}-${pad(i + 1)}`).length).reduce((a, b) => a + b, 0);
+    title = n ? `Bu ay ${n} plan` : 'Ay boş';
+  }
   const seg = ['day', 'week', 'month'].map(m => `<button type="button" data-act="mode" data-mode="${m}" aria-pressed="${ctx.mode === m}">${{ day: 'Gün', week: 'Hafta', month: 'Ay' }[m]}</button>`).join('');
   const off = sel !== t;
   let body = '';
   if (ctx.mode === 'day') body = strip(sel, t) + dayBody(sel, t);
   else if (ctx.mode === 'week') body = weekBody(sel, t);
   else body = monthBody(sel, t);
-  return `<div class="topbar">${off ? `<button type="button" class="bar-btn l" data-act="today" style="font-size:17px;padding:0 6px">Bugün</button>` : ''}<h2>${esc(weekTitle)}</h2></div>
-    <div class="page"><div class="large"><h1>${esc(weekTitle)}</h1><p>${esc(sub)}</p></div>
+  return `${appbar('Plan', off ? '<button type="button" class="pill-btn" data-act="today">Bugün</button>' : '')}
+    <div class="page">${hero(kicker, title, statusChip())}
     <div class="seg" style="--i:${['day', 'week', 'month'].indexOf(ctx.mode)}" role="group" aria-label="Görünüm">${seg}</div>${body}</div>`;
-}
-
-function greeting() {
-  const h = clockAt(Date.now(), tz()).minutes / 60;
-  const name = get().prefs.name;
-  const g = h < 5 ? 'İyi geceler' : h < 12 ? 'Günaydın' : h < 18 ? 'İyi günler' : 'İyi akşamlar';
-  return name ? `${g}, ${name}` : g;
 }
 
 // --- işlemler ---
@@ -138,7 +166,7 @@ export const planActs = {
     let [y, m] = (ctx.month || ctx.day.slice(0, 7)).split('-').map(Number);
     m += +el.dataset.n; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
     ctx.month = `${y}-${pad(m)}`;
-    ctx.day = `${ctx.month}-01` <= today() && today().startsWith(ctx.month) ? today() : `${ctx.month}-01`;
+    ctx.day = today().startsWith(ctx.month) ? today() : `${ctx.month}-01`;
     ctx.render();
   },
   today: () => { ctx.day = today(); ctx.month = ctx.day.slice(0, 7); haptic(); ctx.render(); },
@@ -150,7 +178,7 @@ export const planActs = {
     const next = was === 'done' ? 'pending' : 'done';
     haptic(next === 'done' ? 'success' : 'light');
     ctx.pop = next === 'done' ? `${id}:${origin}` : null;
-    const row = el.closest('.item');
+    const row = el.closest('.task');
     row?.classList.toggle('done', next === 'done');
     row?.classList.toggle('pop', next === 'done');
     await commit(s => {
@@ -165,7 +193,7 @@ export const planActs = {
   },
 };
 
-// Hafta şeridinde / ay ızgarasında yatay kaydırma.
+// Gün şeridinde / ay ızgarasında yatay kaydırma.
 export function bindSwipe(view) {
   let x0 = null, y0 = 0, kind = '';
   view.addEventListener('touchstart', e => {

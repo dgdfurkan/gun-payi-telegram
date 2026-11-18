@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **18 Kasım 2026**. Sürüm **5.1.1**.
+Güncelleme: **18 Kasım 2026**. Sürüm **5.2.0**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,14 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.2 (Stitch tasarımı)
+
+- Kullanıcının Stitch'te hazırladığı "Gelişmiş Arayüz Tasarımı" sistemi uyarlandı: tonlu renk aileleri (koyu ana ton, canlı vurgu, pastel kaplar), Plus Jakarta Sans, ayrı görev kartları, saat hapı, günlük ilerleme, yükselen ekle düğmesi, aylık takvimde kategori renginde noktalar ve şeritli ajanda, boş gün kartı ve hızlı başlangıç çipleri. Stitch'teki fotoğraflı ilham kartları dışarıdan görsel ve uydurma içerik gerektirdiği için alınmadı.
+- Tema artık `prefs.color` (yesil, indigo, mor, mavi, gunbatimi) + `prefs.mode` (light, dark, system). Eski `prefs.theme` değerleri otomatik taşınır. `<html data-color data-theme>`; koyu modda yüzeyler renge hafifçe boyanır.
+- Ayarlar → Görünüm sadeleşti: renk noktaları + Açık/Koyu/Sistem.
+- Açılış animasyonu (`#splash`, güneş doğuşu). iOS açılış görüntüsü düz zemin, animasyon onun üstünden başlar.
+- Yazı tipi Google Fonts'tan; service worker `gp-fonts` önbelleğinde tutar.
 
 ## 5.1.1
 

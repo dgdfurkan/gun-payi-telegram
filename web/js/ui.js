@@ -150,18 +150,20 @@ export async function copyText(text) {
 export const row = ({ ic, label, value = '', act = '', chev = true, cls = '', data = '' }) =>
   `<button type="button" class="cell ${cls}" ${act ? `data-act="${act}"` : ''} ${data}>${ic ? `<span class="cell-ic">${icon(ic)}</span>` : ''}<span class="cell-label">${label}</span><span class="cell-value">${value}</span>${chev ? icon('chevR', 'chev') : ''}</button>`;
 
-// Tema: data-theme + durum çubuğu rengi. "system" telefonun açık/koyu ayarını izler.
+// Tema: <html data-color="yesil" data-theme="light|dark">. "system" telefonun ayarını izler.
 let followSystem = null;
-export function applyTheme(name = 'light', animate = false) {
-  try { localStorage.setItem('gp-theme', name); } catch { /* özel mod */ }
+export function applyTheme(color = 'yesil', mode = 'light', animate = false) {
+  try { localStorage.setItem('gp-theme', JSON.stringify({ color, mode })); } catch { /* özel mod */ }
   const mq = matchMedia('(prefers-color-scheme: dark)');
   const set = () => {
-    document.documentElement.dataset.theme = name === 'system' ? (mq.matches ? 'dark' : 'light') : name;
-    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
-    document.querySelector('meta[name=theme-color]')?.setAttribute('content', bg || '#f3f4f8');
+    const root = document.documentElement;
+    root.dataset.color = color;
+    root.dataset.theme = mode === 'system' ? (mq.matches ? 'dark' : 'light') : mode;
+    const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', bg || '#faf8ff');
   };
   if (followSystem) mq.removeEventListener('change', followSystem);
-  followSystem = name === 'system' ? set : null;
+  followSystem = mode === 'system' ? set : null;
   if (followSystem) mq.addEventListener('change', followSystem);
   if (animate && document.startViewTransition && !reduced()) document.startViewTransition(set); else set();
 }

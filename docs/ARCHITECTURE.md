@@ -13,6 +13,7 @@
 | `web/js/plan.js` | Gün / Hafta / Ay görünümleri, tamamlama |
 | `web/js/compose.js` | Ekleme sayfası (canlı çözümleme, ses), plan ve not düzenleme |
 | `web/js/pages.js` | Notlar, Özet (haftalık değerlendirme), Ayarlar, widget kurulumu |
+| `web/js/chrome.js` | Üst çubuk, başlık bölümü, Telegram durum rozeti |
 | `web/js/pickers.js` | Takvim, saat çarkı, hatırlatma (özel sn/dk/saat/gün), tekrar, ikon seçici |
 | `web/js/categories.js` | **Ortak:** başlıktan kategori/ikon/emoji tahmini |
 | `web/js/ui.js`, `icons.js`, `voice.js` | Alt sayfa (klavye takibi), işlem menüsü, bildirim, titreşim, tema; ikonlar; Web Speech |
@@ -33,7 +34,7 @@ IndexedDB `gun-payi` v1, store `local`, anahtar `state`:
 
 - **Plan:** `id, title, kind, date ('' = Yapılacaklar), time, endTime, repeat (none|daily|weekly|monthly), weekdays, until, reminders (dakika, kesirli = saniye; null = varsayılan), icon ('' = otomatik), status, exceptions{origin: {status,date,time}}, note`.
 - Tekrarlayan planda tek günlük değişiklik `exceptions` içinde tutulur. Bitiş saati başlangıçtan küçükse ertesi güne taşar (16:00–01:00 vardiya).
-- `prefs`: `name, timeZone, reminderDefaults, plannerMode, digest{on,time}, reviewDay, theme`.
+- `prefs`: `name, timeZone, reminderDefaults, plannerMode, digest{on,time}, reviewDay, color, mode`.
 - Telegram bağlantı anahtarı `localStorage['gp-link']` içindedir, yedeğe girmez.
 
 ## Senkron protokolü

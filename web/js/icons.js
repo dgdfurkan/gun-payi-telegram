@@ -27,6 +27,7 @@ const P = {
   dot: '<circle cx="12" cy="12" r="3.2"/>',
   palette: '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.3 0 1.8-.9 1.5-1.9-.4-1.2.5-2.3 1.7-2.3h2.1A3.2 3.2 0 0 0 20.5 13 8.5 8.5 0 0 0 12 3.5Z"/><circle cx="7.8" cy="11.5" r="1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="8" r="1" fill="currentColor" stroke="none"/>',
   minus: '<path d="M5 12h14"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
   stop: '<rect x="7" y="7" width="10" height="10" rx="2.5" fill="currentColor"/>',

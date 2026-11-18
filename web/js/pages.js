@@ -5,19 +5,14 @@ import { icon } from './icons.js';
 import { $, esc, haptic, toast, sheet, confirmDanger, copyText, actions, applyTheme } from './ui.js';
 import { ctx, today } from './ctx.js';
 import * as api from './api.js';
-import { itemRow } from './plan.js';
+import { appbar, hero } from './chrome.js';
+import { catOf } from './categories.js';
+import { tile } from './pickers.js';
 import { VERSION } from './version.js';
 
-const THEMES = [
-  ['light', 'Aydınlık', ['#f3f4f8', '#ffffff', '#6c5ce7', '#8f7dff']],
-  ['mor', 'Lavanta', ['#f4f0ff', '#ffffff', '#7c4dff', '#b388ff']],
-  ['yesil', 'Nane', ['#eef7f1', '#ffffff', '#0f9d58', '#34c759']],
-  ['mavi', 'Okyanus', ['#eef4fc', '#ffffff', '#2563eb', '#38bdf8']],
-  ['gunbatimi', 'Gün batımı', ['#fff4ec', '#ffffff', '#f2611d', '#ffb020']],
-  ['dark', 'Karanlık', ['#000000', '#1c1c1e', '#9b8cff', '#6c5ce7']],
-  ['system', 'Sistem', null],
-];
-const head = (title, sub = '') => `<div class="topbar"><h2>${esc(title)}</h2></div><div class="large"><h1>${esc(title)}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</div>`;
+const COLOR_DOTS = [['yesil', 'Nane', '#006c49', '#10b981'], ['indigo', 'İndigo', '#5140c8', '#7c6cf2'], ['mor', 'Lavanta', '#6b2fd3', '#9a6bff'], ['mavi', 'Okyanus', '#0b57d0', '#3b8bff'], ['gunbatimi', 'Gün batımı', '#b8430d', '#fb7a2b']];
+const MODE_LIST = [['light', 'Açık'], ['dark', 'Koyu'], ['system', 'Sistem']];
+const searchIcon = '<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>';
 
 // ---------------- Notlar ----------------
 export function renderNotes() {
@@ -28,12 +23,13 @@ export function renderNotes() {
   let body = '';
   if (!notes.length) body = `<div class="empty"><div class="em-ic">${icon('notes')}</div><b>Henüz not yok</b>Aklına geleni yaz ya da Telegram'dan “not: …” gönder.<br><button type="button" data-act="add-note">+ Not ekle</button></div>`;
   else if (!list.length) body = `<div class="empty">Sonuç yok.</div>`;
-  else body = `<div class="group">${list.map(n => {
+  else body = `<div class="notes">${list.map(n => {
     const [first, ...rest] = n.text.split('\n');
     return `<button type="button" class="note" data-act="note" data-id="${esc(n.id)}"><b>${esc(first)}</b><span><time>${fmt(n.updatedAt || n.createdAt)}</time>${esc(rest.join(' ').trim() || '')}</span></button>`;
   }).join('')}</div>`;
-  return `${head('Notlar', notes.length ? `${notes.length} not` : '')}<div class="page">
-    ${notes.length ? `<label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><input type="search" placeholder="Ara" value="${esc(ctx.noteQuery)}" data-input="note-q" enterkeyhint="search"></label>` : ''}
+  return `${appbar('Notlar')}<div class="page">
+    ${hero('Aklındakiler', notes.length ? `${notes.length} not` : 'Boş defter')}
+    ${notes.length ? `<label class="search">${searchIcon}<input type="search" placeholder="Notlarda ara" value="${esc(ctx.noteQuery)}" data-input="note-q" enterkeyhint="search"></label>` : ''}
     ${body}</div>`;
 }
 
@@ -59,16 +55,17 @@ export function renderReview() {
   const range = `${+mon.slice(8)} ${MONTHS[+mon.slice(5, 7) - 1]} – ${+end.slice(8)} ${MONTHS[+end.slice(5, 7) - 1]}`;
   const pct = total ? Math.round((done / total) * 100) : 0;
   const past = s.reviews.filter(r => r.week !== mon && r.answers.some(a => a?.trim())).sort((a, b) => b.week.localeCompare(a.week)).slice(0, 8);
-  return `${head('Özet', range)}<div class="page">
+  return `${appbar('Özet')}<div class="page">
+    ${hero('Bu hafta', range)}
     <div class="stats">
-      <div class="stat"><b>${done}<small style="font-size:17px;color:var(--label-2);font-weight:500"> / ${total}</small></b><span>Bu hafta tamamlanan</span><div class="bar"><i style="width:${pct}%"></i></div></div>
+      <div class="stat"><b>${done}<small> / ${total}</small></b><span>Tamamlanan plan</span><div class="track"><i style="width:${pct}%"></i></div></div>
       <div class="stat"><b>${upcoming}</b><span>Gelecek hafta plan${inbox ? ` · ${inbox} yapılacak` : ''}</span></div>
     </div>
-    ${open.length ? `<div class="section-h">Açık kalanlar</div><div class="list">${open.slice(0, 12).map(o => `<div class="item" data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">
-        <div class="item-main"><div class="item-title">${esc(o.title)}</div><div class="item-meta"><span>${icon('cal')}${esc(dayLabel(o.date, t))}${o.time ? ' ' + o.time : ''}</span></div></div>
-        <div class="mini-actions"><button type="button" data-act="carry" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">Bugüne</button><button type="button" data-act="toggle" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">${icon('check')}</button></div></div>`).join('')}</div>
+    ${open.length ? `<div class="sec-h"><h3>Açık kalanlar</h3><span>${open.length}</span></div><div class="tasks">${open.slice(0, 12).map(o => `<div class="task" data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">
+        ${tile(catOf(o))}<div class="task-main"><div class="task-title">${esc(o.title)}</div><div class="tags"><span class="tag">${icon('cal')}${esc(dayLabel(o.date, t))}${o.time ? ' ' + o.time : ''}</span></div></div>
+        <div class="mini-actions"><button type="button" data-act="carry" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}">Bugüne</button><button type="button" data-act="toggle" data-id="${esc(o.id)}" data-origin="${esc(o.origin)}" aria-label="Tamamla">${icon('check')}</button></div></div>`).join('')}</div>
       <p class="section-f">Bitmeyenler kendiliğinden taşınmaz; istersen bugüne al.</p>` : ''}
-    <div class="section-h">Haftalık değerlendirme</div>
+    <div class="sec-h"><h3>Haftalık değerlendirme</h3></div>
     <div class="group">${QUESTIONS.map((q, i) => `<div class="q"><label for="q${i}">${esc(q)}</label><textarea id="q${i}" rows="1" data-q="${i}" placeholder="Kısa bir not…">${esc(review.answers[i] || '')}</textarea></div>`).join('')}</div>
     <p class="section-f">Cevaplar yalnız bu cihazda saklanır.</p>
     ${past.length ? `<div class="section-h">Önceki haftalar</div><div class="group">${past.map(r => `<button type="button" class="cell" data-act="past-review" data-week="${r.week}"><span class="cell-label">${+r.week.slice(8)} ${MONTHS[+r.week.slice(5, 7) - 1]} haftası<small>${esc((r.answers.find(a => a?.trim()) || '').slice(0, 60))}</small></span>${icon('chevR', 'chev')}</button>`).join('')}</div>` : ''}
@@ -89,36 +86,39 @@ export function renderSettings() {
       <div class="cell"><span class="cell-ic tg">${icon('tg')}</span><span class="cell-label"><span class="status-dot on"></span>Bağlı${l.name ? ` · ${esc(l.name)}` : ''}<small>Sıradaki hatırlatma: ${esc(nextText)}</small></span></div>
       <button type="button" class="cell" data-act="tg-test" data-delay="0"><span class="cell-ic">${icon('send')}</span><span class="cell-label">Deneme mesajı gönder</span></button>
       <button type="button" class="cell" data-act="tg-test" data-delay="60"><span class="cell-ic orange">${icon('clock')}</span><span class="cell-label">1 dk sonra dene<small>Uygulamayı kapat, mesaj yine gelsin</small></span></button>
-      <label class="cell"><span class="cell-ic green">${icon('sun')}</span><span class="cell-label">Sabah özeti</span>${s.prefs.digest.on ? `<input type="time" value="${s.prefs.digest.time}" data-input="digest-time" style="margin-right:8px">` : ''}<span class="switch"><input type="checkbox" data-input="digest" ${s.prefs.digest.on ? 'checked' : ''}><span></span></span></label>
+      <label class="cell"><span class="cell-ic green">${icon('sun')}</span><span class="cell-label">Sabah özeti${s.prefs.digest.on ? `<small>Her gün ${s.prefs.digest.time}</small>` : ''}</span><span class="switch"><input type="checkbox" data-input="digest" ${s.prefs.digest.on ? 'checked' : ''}><span></span></span></label>
       <label class="cell"><span class="cell-ic gray">${icon('pause')}</span><span class="cell-label">Hatırlatmaları duraklat</span><span class="switch"><input type="checkbox" data-input="pause" ${sync?.paused || statusCache?.paused ? 'checked' : ''}><span></span></span></label>
     </div>
-    <p class="section-f">${sync?.error ? `Son eşitleme hatası: ${esc(sync.error)}` : 'Planların hatırlatma için kendi sunucuna eşitlenir. Bota yazarak ya da sesli mesajla da ekleyebilirsin.'}</p>`;
+    <p class="section-f">${sync?.error ? `Son eşitleme hatası: ${esc(sync.error)}` : 'Bota yazarak ya da sesli mesajla da ekleyebilirsin.'}</p>`;
   } else {
     const waiting = api.linking();
     tg = linkErr
       ? `<div class="group"><div class="cell"><span class="cell-ic tg">${icon('tg')}</span><span class="cell-label">Telegram botu hazır değil<small>${esc(linkErr)}</small></span></div></div>`
       : `${linkInfo ? `<a class="big-btn tg" href="${esc(linkInfo.url)}" target="_blank" rel="noopener" data-act="tg-go">${icon('tg')}${waiting ? 'Telegram’ı tekrar aç' : 'Telegram’a bağlan'}</a>` : `<button type="button" class="big-btn tg" disabled>${icon('tg')}Hazırlanıyor…</button>`}
-         <p class="section-f">${waiting ? '<b>Telegram’da Başlat’a dokun</b>, sonra buraya dön. Bağlantı kendiliğinden tamamlanır.' : 'Telegram açılır, <b>Başlat</b>’a dokunursun; hepsi bu. Hatırlatmalar saatine de gelir.'}</p>`;
+         <p class="section-f">${waiting ? '<b>Telegram’da Başlat’a dokun</b>, sonra buraya dön.' : 'Telegram açılır, <b>Başlat</b>’a dokunursun; hepsi bu.'}</p>`;
   }
   const rem = s.prefs.reminderDefaults;
-  return `${head('Ayarlar')}<div class="page">
-    <div class="group"><div class="profile"><div class="avatar">${esc(initial)}</div><label style="flex:1;min-width:0"><input type="text" value="${esc(s.prefs.name)}" placeholder="Adın" data-input="name" enterkeyhint="done" autocomplete="given-name"><small>Selamlamada ve sabah özetinde kullanılır</small></label></div></div>
-    <div class="section-h">Görünüm</div><div class="group"><div class="themes">${THEMES.map(([k, label, c]) => `<button type="button" class="sw ${s.prefs.theme === k ? 'on' : ''}" data-act="theme" data-t="${k}"><span class="sw-box ${c ? '' : 'half'}" ${c ? `style="--sb:${c[0]};--sc:${c[1]};--sa:${c[2]};--sa2:${c[3]}"` : ''}><i></i><i></i><i></i><em></em></span>${label}</button>`).join('')}</div></div>
+  const modeIdx = Math.max(0, MODE_LIST.findIndex(([k]) => k === s.prefs.mode));
+  return `${appbar('Ayarlar')}<div class="page">
+    <div class="group"><div class="profile"><div class="avatar">${esc(initial)}</div><label style="flex:1;min-width:0"><input type="text" value="${esc(s.prefs.name)}" placeholder="Adın" data-input="name" enterkeyhint="done" autocomplete="given-name"><small>Selamlamada ve sabah özetinde</small></label></div></div>
+    <div class="section-h">Görünüm</div>
+    <div class="group">
+      <div class="look"><span>Renk</span><div class="dots-pick">${COLOR_DOTS.map(([k, label, p, pc]) => `<button type="button" class="dot-c ${s.prefs.color === k ? 'on' : ''}" data-act="color" data-c="${k}" style="--dp:${p};--dc:${pc}" aria-label="${label}"></button>`).join('')}</div></div>
+      <div class="look"><span>Mod</span><div class="seg" style="--i:${modeIdx}">${MODE_LIST.map(([k, label]) => `<button type="button" data-act="ui-mode" data-m="${k}" aria-pressed="${s.prefs.mode === k}">${label}</button>`).join('')}</div></div>
+    </div>
     <div class="section-h">Telegram</div>${tg}
     <div class="section-h">Varsayılan hatırlatma</div>
-    <div class="group"><div class="cell" style="flex-wrap:wrap;gap:8px">${[[0, 'Tam vaktinde'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [1440, '1 gün']].map(([v, lb]) => `<button type="button" class="chip ${rem.includes(v) ? 'on' : ''}" data-act="def-rem" data-v="${v}" style="box-shadow:none;${rem.includes(v) ? '' : 'background:var(--fill)'}">${lb}</button>`).join('')}</div></div>
-    <p class="section-f">Saatli planlarda, ayrıca seçmediysen: ${esc(rem.length ? remindersLabel(rem) : 'hatırlatma yok')}.</p>
+    <div class="group pad"><div class="picker-row">${[[0, 'Vaktinde'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [1440, '1 gün']].map(([v, lb]) => `<button type="button" class="chip ${rem.includes(v) ? 'on' : ''}" data-act="def-rem" data-v="${v}">${lb}</button>`).join('')}</div></div>
     <div class="section-h">Hızlı ekleme</div>
-    <div class="group"><button type="button" class="cell" data-act="widget"><span class="cell-ic">${icon('widget')}</span><span class="cell-label">Ana ekran widget’ı<small>Uygulamayı açmadan sesle ekle</small></span>${icon('chevR', 'chev')}</button></div>
+    <div class="group"><button type="button" class="cell" data-act="widget"><span class="cell-ic">${icon('widget')}</span><span class="cell-label">Ana ekrandan ekle<small>Telegram widget’ı ya da Siri kısayolu</small></span>${icon('chevR', 'chev')}</button></div>
     <div class="section-h">Veri</div>
     <div class="group">
       <button type="button" class="cell" data-act="backup-copy"><span class="cell-ic green">${icon('copy')}</span><span class="cell-label">Yedeği kopyala</span></button>
       <button type="button" class="cell" data-act="backup-paste"><span class="cell-ic orange">${icon('inbox')}</span><span class="cell-label">Yedeği yapıştır<small>Eski Gün Payı yedeği de olur</small></span></button>
+      ${l ? `<button type="button" class="cell danger" data-act="tg-unlink">Telegram bağlantısını kes</button>` : ''}
+      <button type="button" class="cell danger" data-act="wipe">Tüm verileri sil</button>
     </div>
-    <p class="section-f">Veriler bu telefonda saklanır. Yedek, Telegram bağlantı anahtarını içermez.</p>
-    <div class="group" style="margin-top:28px"><button type="button" class="cell danger" data-act="${l ? 'tg-unlink' : 'wipe'}">${l ? 'Telegram bağlantısını kes' : 'Tüm verileri sil'}</button></div>
-    ${l ? `<div class="group" style="margin-top:12px"><button type="button" class="cell danger" data-act="wipe">Tüm verileri sil</button></div>` : ''}
-    <p class="version">Gün Payı ${VERSION}</p></div>`;
+    <p class="version">Gün Payı ${VERSION} · Veriler bu telefonda</p></div>`;
 }
 
 // Bağlantı linkini önceden hazırla: iOS, kullanıcının dokunduğu gerçek bir linki daha güvenle açar.
@@ -271,11 +271,17 @@ export const pageActs = {
     api.sync();
   },
   widget: () => widgetSheet(),
-  theme: el => {
-    const t = el.dataset.t;
+  color: el => {
+    const c = el.dataset.c;
     haptic();
-    applyTheme(t, true);
-    commit(s => { s.prefs.theme = t; });
+    applyTheme(c, get().prefs.mode, true);
+    commit(s => { s.prefs.color = c; });
+  },
+  'ui-mode': el => {
+    const m = el.dataset.m;
+    haptic();
+    applyTheme(get().prefs.color, m, true);
+    commit(s => { s.prefs.mode = m; });
   },
   'backup-copy': async () => { haptic(); toast((await copyText(backupText())) ? 'Yedek panoya kopyalandı' : 'Kopyalanamadı'); },
   'backup-paste': () => pasteBackup(),
