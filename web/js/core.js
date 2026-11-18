@@ -1,6 +1,7 @@
 // Ortak çekirdek: tarih, tekrar, hatırlatma ve doğrulama. Hem uygulama hem Worker kullanır.
 
 export const TZ_DEFAULT = 'Europe/Istanbul';
+export const THEMES = ['light', 'dark', 'system', 'mor', 'yesil', 'mavi', 'gunbatimi'];
 export const DAY_NAMES = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 export const DAY_SHORT = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 export const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
@@ -126,7 +127,7 @@ export function jobsFor(items, prefs, now = Date.now(), days = 8) {
         const id = `${o.id}:${origin}:${o.time}:${m}`;
         if (seen.has(id)) continue;
         seen.add(id);
-        out.push({ id, itemId: o.id, origin, date: o.date, time: o.time, title: o.title, start, due, minutes: m });
+        out.push({ id, itemId: o.id, origin, date: o.date, time: o.time, title: o.title, icon: o.icon || '', start, due, minutes: m });
       }
     }
   }
@@ -136,6 +137,7 @@ export function jobsFor(items, prefs, now = Date.now(), days = 8) {
 // --- Etiketler ---------------------------------------------------------------
 export function minutesLabel(m) {
   if (m === 0) return 'tam vaktinde';
+  if (m < 1) return `${Math.round(m * 60)} sn önce`;
   if (m % 1440 === 0) return `${m / 1440} gün önce`;
   if (m % 60 === 0) return `${m / 60} saat önce`;
   if (m > 60) return `${Math.floor(m / 60)} sa ${m % 60} dk önce`;
@@ -148,7 +150,9 @@ export function remindersLabel(list) {
   const s = [...list].sort((a, b) => a - b);
   const parts = [];
   if (s.includes(0)) parts.push('vaktinde');
-  const mins = s.filter(m => m > 0 && (m < 60 || m % 60));
+  const secs = s.filter(m => m > 0 && m < 1);
+  if (secs.length) parts.push(secs.map(m => Math.round(m * 60)).join(', ') + ' sn');
+  const mins = s.filter(m => m >= 1 && (m < 60 || m % 60));
   const hours = s.filter(m => m >= 60 && m % 60 === 0 && m % 1440);
   const days = s.filter(m => m >= 1440 && m % 1440 === 0);
   if (mins.length) parts.push(mins.map(m => (m < 60 ? m : `${Math.floor(m / 60)} sa ${m % 60}`)).join(', ') + ' dk');
@@ -201,8 +205,9 @@ const STATUS = ['pending', 'done', 'cancelled'];
 export function cleanReminders(v) {
   if (v === null || v === undefined) return null;
   if (!Array.isArray(v) || v.length > 6) throw Error('Hatırlatma süreleri geçersiz.');
-  const out = [...new Set(v.map(Number))];
-  if (out.some(n => !Number.isInteger(n) || n < 0 || n > 40320)) throw Error('Hatırlatma süreleri geçersiz.');
+  // Dakika cinsinden; saniye hassasiyeti için kesirli olabilir (0.25 = 15 sn).
+  const out = [...new Set(v.map(n => Math.round(Number(n) * 60) / 60))];
+  if (out.some(n => !Number.isFinite(n) || n < 0 || n > 40320)) throw Error('Hatırlatma süreleri geçersiz.');
   return out.sort((a, b) => b - a);
 }
 function cleanPatch(p) {
@@ -240,6 +245,7 @@ export function cleanItem(raw) {
     reminders: cleanReminders(raw.reminders),
     status: STATUS.includes(raw.status) ? raw.status : raw.status === 'postponed' ? 'cancelled' : 'pending',
     exceptions, note: typeof raw.note === 'string' ? raw.note.slice(0, 4000) : '',
+    icon: typeof raw.icon === 'string' && /^[a-z]{2,12}$/.test(raw.icon) ? raw.icon : '',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now,
   };
@@ -254,5 +260,6 @@ export function cleanPrefs(raw = {}) {
     plannerMode: ['day', 'week', 'month'].includes(raw.plannerMode) ? raw.plannerMode : 'day',
     digest: { on: Boolean(raw.digest?.on), time: isTime(raw.digest?.time) ? raw.digest.time : '08:00' },
     reviewDay: Number.isInteger(raw.reviewDay) && raw.reviewDay >= 0 && raw.reviewDay <= 6 ? raw.reviewDay : 0,
+    theme: THEMES.includes(raw.theme) ? raw.theme : 'light',
   };
 }

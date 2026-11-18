@@ -5,6 +5,8 @@ import { icon } from './icons.js';
 import { esc, haptic, toast } from './ui.js';
 import { ctx, today, tz } from './ctx.js';
 import { sync } from './api.js';
+import { catOf } from './categories.js';
+import { tile } from './pickers.js';
 
 const fullDate = d => { const [, m, dd] = d.split('-').map(Number); return `${dd} ${MONTHS[m - 1]} ${DAY_NAMES[weekday(d)]}`; };
 
@@ -29,6 +31,7 @@ export function itemRow(o, t, { showDate = false } = {}) {
   if (ctx.enter === o.id) cls += ' enter';
   return `<div class="item ${cls}" data-act="open" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}">
     <button type="button" class="check" data-act="toggle" data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}" aria-label="${done ? 'Geri al' : 'Tamamla'}">${icon('check')}</button>
+    ${tile(catOf(o))}
     <div class="item-main"><div class="item-title">${esc(o.title)}</div>${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}</div>
     ${o.time ? `<div class="item-time">${o.time}${o.endTime ? `<small>${o.endTime}</small>` : ''}</div>` : ''}
   </div>`;
@@ -54,7 +57,7 @@ function dayBody(day, t) {
   if (list.length) html += `<div class="list">${list.map(o => itemRow(o, t)).join('')}</div>`;
   const inbox = day === t ? s.items.filter(i => !i.date && (i.status === 'pending' || ctx.pop === `${i.id}:`)) : [];
   if (!list.length && !inbox.length) {
-    html += `<div class="empty">${icon(day === t ? 'sun' : 'cal')}<b>${day === t ? 'Bugün boş' : 'Plan yok'}</b>${day === t ? 'Güne yer açık.' : esc(fullDate(day))}<br><button type="button" data-act="add" data-day="${day}">+ Plan ekle</button></div>`;
+    html += `<div class="empty"><div class="em-ic">${icon(day === t ? 'sun' : 'cal')}</div><b>${day === t ? 'Bugün boş' : 'Plan yok'}</b>${day === t ? 'Güne yer açık.' : esc(fullDate(day))}<br><button type="button" data-act="add" data-day="${day}">+ Plan ekle</button></div>`;
   }
   if (inbox.length) {
     html += `<div class="section-h big">Yapılacaklar<small style="font-size:15px;color:var(--label-2);font-weight:400">${inbox.length}</small></div>`;
@@ -111,7 +114,7 @@ export function renderPlan() {
   else body = monthBody(sel, t);
   return `<div class="topbar">${off ? `<button type="button" class="bar-btn l" data-act="today" style="font-size:17px;padding:0 6px">Bugün</button>` : ''}<h2>${esc(weekTitle)}</h2></div>
     <div class="page"><div class="large"><h1>${esc(weekTitle)}</h1><p>${esc(sub)}</p></div>
-    <div class="seg" role="group" aria-label="Görünüm">${seg}</div>${body}</div>`;
+    <div class="seg" style="--i:${['day', 'week', 'month'].indexOf(ctx.mode)}" role="group" aria-label="Görünüm">${seg}</div>${body}</div>`;
 }
 
 function greeting() {

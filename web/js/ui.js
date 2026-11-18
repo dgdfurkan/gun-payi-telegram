@@ -37,38 +37,41 @@ export function toast(text, action) {
 
 // --- Alt sayfa (iOS kart modalı) ---
 const stack = [];
-export function sheet({ title = '', left = 'Vazgeç', right = '', rightDisabled = false, body = '', cls = '', onRight, onClose, onMount, full = true }) {
+export function sheet({ title = '', left = 'Vazgeç', right = '', rightDisabled = false, body = '', cls = '', onRight, onClose, onMount, full = true, nav = true }) {
   const root = document.createElement('div');
   root.className = 'sheet-root';
   root.innerHTML = `<div class="sheet-backdrop"></div>
     <section class="sheet ${full ? 'full' : 'auto'} ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="grabber"></div>
-      <header class="sheet-nav">
+      ${nav ? `<header class="sheet-nav">
         <button type="button" class="nav-btn" data-sheet="close">${esc(left)}</button>
         <h2>${esc(title)}</h2>
         ${right ? `<button type="button" class="nav-btn strong" data-sheet="right" ${rightDisabled ? 'disabled' : ''}>${esc(right)}</button>` : '<span class="nav-btn"></span>'}
-      </header>
+      </header>` : ''}
       <div class="sheet-body">${body}</div>
     </section>`;
   document.body.append(root);
+  const el = root.querySelector('.sheet');
+  const untrack = trackKeyboard(el);
   const api = {
-    root, el: root.querySelector('.sheet'), body: root.querySelector('.sheet-body'),
+    root, el, body: root.querySelector('.sheet-body'),
     setRight(disabled) { const b = root.querySelector('[data-sheet=right]'); if (b) b.disabled = disabled; },
     close(result) {
       if (api.closed) return;
       api.closed = true;
+      document.activeElement?.blur?.();
+      untrack();
       root.classList.remove('open');
+      root.classList.add('closing');
       stack.splice(stack.indexOf(api), 1);
       if (!stack.length) document.documentElement.classList.remove('sheet-open');
       onClose?.(result);
-      const done = () => root.remove();
-      if (reduced()) done(); else setTimeout(done, 340);
+      setTimeout(() => root.remove(), reduced() ? 0 : 320);
     },
   };
   root.querySelector('.sheet-backdrop').onclick = () => api.close();
-  root.querySelector('[data-sheet=close]').onclick = () => api.close();
-  const rb = root.querySelector('[data-sheet=right]');
-  if (rb) rb.onclick = () => onRight?.(api);
+  root.querySelector('[data-sheet=close]')?.addEventListener('click', () => api.close());
+  root.querySelector('[data-sheet=right]')?.addEventListener('click', () => onRight?.(api));
   dragToClose(api);
   stack.push(api);
   document.documentElement.classList.add('sheet-open');
@@ -76,11 +79,26 @@ export function sheet({ title = '', left = 'Vazgeç', right = '', rightDisabled 
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('open')));
   return api;
 }
+
+// Klavye açılınca sayfa klavyenin üstüne çıkar (iOS'ta görünür alan küçülür, düzen alanı küçülmez).
+function trackKeyboard(el) {
+  const vv = window.visualViewport;
+  if (!vv) return () => {};
+  const update = () => {
+    const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
+    el.style.setProperty('--kb', kb + 'px');
+    el.classList.toggle('kb', kb > 80);
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  update();
+  return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+}
 export const topSheet = () => stack.at(-1);
 
 // Sayfayı tutamaktan veya başlıktan aşağı sürükleyerek kapatma.
 function dragToClose(api) {
-  const el = api.el, handle = el.querySelector('.sheet-nav'), grab = el.querySelector('.grabber');
+  const el = api.el, handle = el.querySelector('.sheet-nav') || el.querySelector('.cmp-head') || el.querySelector('.grabber'), grab = el.querySelector('.grabber');
   let y0 = null, dy = 0;
   const down = e => { if (e.target.closest('button,input,textarea')) return; y0 = e.touches[0].clientY; dy = 0; el.style.transition = 'none'; };
   const move = e => {
@@ -95,7 +113,7 @@ function dragToClose(api) {
     if (dy > 110) api.close();
     y0 = null;
   };
-  for (const h of [handle, grab]) {
+  for (const h of new Set([handle, grab])) {
     h.addEventListener('touchstart', down, { passive: true });
     h.addEventListener('touchmove', move, { passive: true });
     h.addEventListener('touchend', up);
@@ -114,7 +132,8 @@ export function actions(title, list) {
     document.body.append(root);
     const finish = i => {
       root.classList.remove('open');
-      setTimeout(() => root.remove(), reduced() ? 0 : 280);
+      root.classList.add('closing');
+      setTimeout(() => root.remove(), reduced() ? 0 : 300);
       resolve(i >= 0 ? list[i].value ?? i : null);
     };
     root.querySelector('.sheet-backdrop').onclick = () => finish(-1);
@@ -130,3 +149,19 @@ export async function copyText(text) {
 
 export const row = ({ ic, label, value = '', act = '', chev = true, cls = '', data = '' }) =>
   `<button type="button" class="cell ${cls}" ${act ? `data-act="${act}"` : ''} ${data}>${ic ? `<span class="cell-ic">${icon(ic)}</span>` : ''}<span class="cell-label">${label}</span><span class="cell-value">${value}</span>${chev ? icon('chevR', 'chev') : ''}</button>`;
+
+// Tema: data-theme + durum çubuğu rengi. "system" telefonun açık/koyu ayarını izler.
+let followSystem = null;
+export function applyTheme(name = 'light', animate = false) {
+  try { localStorage.setItem('gp-theme', name); } catch { /* özel mod */ }
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  const set = () => {
+    document.documentElement.dataset.theme = name === 'system' ? (mq.matches ? 'dark' : 'light') : name;
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', bg || '#f3f4f8');
+  };
+  if (followSystem) mq.removeEventListener('change', followSystem);
+  followSystem = name === 'system' ? set : null;
+  if (followSystem) mq.addEventListener('change', followSystem);
+  if (animate && document.startViewTransition && !reduced()) document.startViewTransition(set); else set();
+}

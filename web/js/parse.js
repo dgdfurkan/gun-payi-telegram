@@ -64,6 +64,7 @@ function reminderValue(numStr, unit) {
   if (numStr === 'çeyrek') return 15;
   if (/^(saat|sa)$/.test(u)) return Math.round(n * 60);
   if (u === 'gün') return Math.round(n * 1440);
+  if (u === 'saniye' || u === 'sn') return Math.round(n) / 60;
   return Math.round(n);
 }
 
@@ -85,7 +86,7 @@ export function parse(input, opts = {}) {
   t.each('not olarak (?:ekle|kaydet|al)', 'note', () => { out.kind = 'note'; });
 
   // 2) Hatırlatmalar: "10 ve 15 dakika önce", "yarım saat önce", "1 gün önceden"
-  const UNIT = '(dakika|dakka|dk|dak|saat|sa|gün)';
+  const UNIT = '(saniye|sn|dakika|dakka|dk|dak|saat|sa|gün)';
   const ITEM = `(?:${NUM}|yarım|çeyrek)(?:\\s*${UNIT})?`;
   t.each(`((?:${ITEM})(?:${SEP}(?:${ITEM}))*)\\s*${UNIT}?\\s*(?:önce(?:si|sinde|den|ye|yi|sini|siyle)?|öncesinden|kala|evvel)`, 'rem', m => {
     const tail = m[m.length - 1];
@@ -96,7 +97,7 @@ export function parse(input, opts = {}) {
       const mm = c.match(new RegExp(`^(${NUM}|yarım|çeyrek)\\s*${UNIT}?$`, 'u'));
       if (!mm) return false;
       const v = reminderValue(mm[1].trim(), mm[2] || lastUnit);
-      if (v === null || v > 40320) return false;
+      if (v === null || v > 40320 || (v < 1 && v * 60 < 1)) return false;
       list.push(v);
     }
     out.reminders = [...new Set([...(out.reminders || []), ...list])];

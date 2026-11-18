@@ -2,12 +2,21 @@
 import { itemsOn, dayAdd, mondayOf, dayLabel, MONTHS, remindersLabel, patchOccurrence, isTime } from './core.js';
 import { get, commit, backupText, parseBackup } from './store.js';
 import { icon } from './icons.js';
-import { $, esc, haptic, toast, sheet, confirmDanger, copyText, actions } from './ui.js';
+import { $, esc, haptic, toast, sheet, confirmDanger, copyText, actions, applyTheme } from './ui.js';
 import { ctx, today } from './ctx.js';
 import * as api from './api.js';
 import { itemRow } from './plan.js';
 import { VERSION } from './version.js';
 
+const THEMES = [
+  ['light', 'Aydınlık', ['#f3f4f8', '#ffffff', '#6c5ce7', '#8f7dff']],
+  ['mor', 'Lavanta', ['#f4f0ff', '#ffffff', '#7c4dff', '#b388ff']],
+  ['yesil', 'Nane', ['#eef7f1', '#ffffff', '#0f9d58', '#34c759']],
+  ['mavi', 'Okyanus', ['#eef4fc', '#ffffff', '#2563eb', '#38bdf8']],
+  ['gunbatimi', 'Gün batımı', ['#fff4ec', '#ffffff', '#f2611d', '#ffb020']],
+  ['dark', 'Karanlık', ['#000000', '#1c1c1e', '#9b8cff', '#6c5ce7']],
+  ['system', 'Sistem', null],
+];
 const head = (title, sub = '') => `<div class="topbar"><h2>${esc(title)}</h2></div><div class="large"><h1>${esc(title)}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</div>`;
 
 // ---------------- Notlar ----------------
@@ -17,7 +26,7 @@ export function renderNotes() {
   const list = q ? notes.filter(n => n.text.toLocaleLowerCase('tr').includes(q)) : notes;
   const fmt = iso => { const d = new Date(iso); const t = today(); const day = d.toLocaleDateString('sv-SE'); return day === t ? d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }); };
   let body = '';
-  if (!notes.length) body = `<div class="empty">${icon('notes')}<b>Henüz not yok</b>Aklına geleni yaz ya da Telegram'dan “not: …” gönder.<br><button type="button" data-act="add-note">+ Not ekle</button></div>`;
+  if (!notes.length) body = `<div class="empty"><div class="em-ic">${icon('notes')}</div><b>Henüz not yok</b>Aklına geleni yaz ya da Telegram'dan “not: …” gönder.<br><button type="button" data-act="add-note">+ Not ekle</button></div>`;
   else if (!list.length) body = `<div class="empty">Sonuç yok.</div>`;
   else body = `<div class="group">${list.map(n => {
     const [first, ...rest] = n.text.split('\n');
@@ -94,6 +103,7 @@ export function renderSettings() {
   const rem = s.prefs.reminderDefaults;
   return `${head('Ayarlar')}<div class="page">
     <div class="group"><div class="profile"><div class="avatar">${esc(initial)}</div><label style="flex:1;min-width:0"><input type="text" value="${esc(s.prefs.name)}" placeholder="Adın" data-input="name" enterkeyhint="done" autocomplete="given-name"><small>Selamlamada ve sabah özetinde kullanılır</small></label></div></div>
+    <div class="section-h">Görünüm</div><div class="group"><div class="themes">${THEMES.map(([k, label, c]) => `<button type="button" class="sw ${s.prefs.theme === k ? 'on' : ''}" data-act="theme" data-t="${k}"><span class="sw-box ${c ? '' : 'half'}" ${c ? `style="--sb:${c[0]};--sc:${c[1]};--sa:${c[2]};--sa2:${c[3]}"` : ''}><i></i><i></i><i></i><em></em></span>${label}</button>`).join('')}</div></div>
     <div class="section-h">Telegram</div>${tg}
     <div class="section-h">Varsayılan hatırlatma</div>
     <div class="group"><div class="cell" style="flex-wrap:wrap;gap:8px">${[[0, 'Tam vaktinde'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [1440, '1 gün']].map(([v, lb]) => `<button type="button" class="chip ${rem.includes(v) ? 'on' : ''}" data-act="def-rem" data-v="${v}" style="box-shadow:none;${rem.includes(v) ? '' : 'background:var(--fill)'}">${lb}</button>`).join('')}</div></div>
@@ -154,30 +164,32 @@ function widgetSheet() {
   const token = api.token();
   const url = location.origin + '/api/quick';
   sheet({
-    title: 'Widget', left: 'Kapat',
+    title: 'Ana ekran widget’ı', left: 'Kapat',
     body: `<div class="form">
-      <p class="section-f" style="padding-top:12px;font-size:15px;color:var(--label)">Ana ekrandaki tek dokunuşla konuş: <i>“Her cuma 12’de babaannemi ara”</i>. Uygulama açılmadan plana eklenir, Telegram’dan hatırlatılır. Siri dikte eder, izin bir kez sorulur.</p>
-      ${l ? `<div class="section-h">1 · Bağlantı kodunu kopyala</div>
-      <div class="code-box"><span style="flex:1">${esc(token.slice(0, 10))}••••••</span><button type="button" data-x="copy">Kopyala</button></div>
-      <div class="section-h">2 · Kısayolu kur</div>
-      <div data-shortcut hidden><a class="big-btn" href="/kisayol.shortcut">${icon('widget')}Kısayolu ekle</a>
-      <p class="section-f">Kısayollar açılınca “Bağlantı kodu” sorusuna kopyaladığın kodu yapıştır.</p></div>
-      <ol class="steps" data-manual><li>Kısayollar → <b>+</b> → adını <b>Gün Payı’na ekle</b> yap.</li><li><b>Metni Dikte Et</b> ekle, Dil: <b>Türkçe</b>.</li><li><b>URL’nin İçeriğini Al</b> ekle. URL: <code style="word-break:break-all">${esc(url)}</code><br>Yöntem <b>POST</b> · Başlıklar: <b>Authorization</b> = <code>Bearer</code> + boşluk + kod · İstek Gövdesi <b>JSON</b>: <b>text</b> = Dikte Edilen Metin.</li><li><b>Bildirim Göster</b> ekle: URL’nin İçeriği.</li></ol>
-      <div class="section-h">3 · Ana ekrana koy</div>
-      <ol class="steps"><li>Ana ekranda boş bir yere basılı tut.</li><li>Sol üstte <b>+</b> → <b>Kısayollar</b>.</li><li><b>Gün Payı’na ekle</b> kısayolunu seç, <b>Widget Ekle</b>.</li></ol>`
-      : `<div class="empty">${icon('tg')}<b>Önce Telegram’a bağlan</b>Widget, planı senin sunucuna gönderir; bunun için bağlantı gerekir.</div>`}
+      <div class="wg-hero"><div class="wg-ic">${icon('mic')}</div><div><b>Ana ekrandan tek dokunuşla ekle</b><span>Konuş, eklensin. Uygulamayı açmana gerek yok, izin her seferinde sorulmaz.</span></div></div>
+      ${l ? `<div class="step" data-step="1"><span class="step-n">1</span><div class="step-b"><b>Kısayolu ekle</b>
+          <p>Dokununca bağlantı kodun kopyalanır ve Kısayollar açılır. Safari indirmeyi sorarsa <b>İndir</b>, sonra dosyaya dokun. “Bağlantı kodu” sorusuna <b>yapıştır</b> → <b>Kısayol Ekle</b>.</p>
+          <a class="big-btn" href="/kisayol.shortcut" target="_blank" rel="noopener" data-x="sc">${icon('widget')}Kısayolu ekle</a></div></div>
+        <div class="step"><span class="step-n">2</span><div class="step-b"><b>Ana ekrana koy</b>
+          <div class="howto"><div>${icon('plan')}Ana ekranda boş yere basılı tut</div><div>${icon('plus')}Düzenle → Widget Ekle</div><div>${icon('widget')}Kısayollar → Gün Payı’na ekle</div></div></div></div>
+        <div class="step"><span class="step-n">3</span><div class="step-b"><b>Dene</b><p>Widget’a dokun, “Yarın 9’da spor” de. Plana eklenir, bildirim gelir, Telegram’dan hatırlatılır.</p></div></div>
+        <details class="manual"><summary>Kısayol açılmazsa elle kur</summary><ol class="steps">
+          <li>Kısayollar → <b>+</b> → <b>Metni Dikte Et</b> (Türkçe).</li>
+          <li><b>URL’nin İçeriğini Al</b>: <code>${esc(url)}</code>, Yöntem <b>POST</b>, Başlık <b>Authorization</b> = <code>Bearer</code> + boşluk + kod, Gövde <b>JSON</b>: <b>text</b> = Dikte Edilen Metin.</li>
+          <li><b>Bildirim Göster</b>: URL’nin İçeriği.</li></ol>
+          <button type="button" class="chip" data-x="copy" style="margin:4px 0 6px">${icon('copy')}Kodu kopyala</button></details>`
+      : `<div class="empty"><div class="em-ic">${icon('tg')}</div><b>Önce Telegram’a bağlan</b>Widget planı senin sunucuna gönderir; bunun için tek seferlik bağlantı gerekir.</div>`}
     </div>`,
-    onMount: sh => {
-      sh.body.addEventListener('click', async e => {
-        if (e.target.closest('[data-x=copy]')) { haptic(); toast((await copyText(token)) ? 'Kod kopyalandı' : 'Kopyalanamadı'); }
-      });
-      // İmzalı kısayol dosyası yayımlandıysa tek dokunuşla kurulum; yoksa elle adımlar.
-      fetch('/kisayol.shortcut', { method: 'HEAD', cache: 'no-store' }).then(r => {
-        const ok = r.ok && !(r.headers.get('content-type') || '').includes('html');
-        const box = sh.body.querySelector('[data-shortcut]'), manual = sh.body.querySelector('[data-manual]');
-        if (ok && box) { box.hidden = false; manual.hidden = true; }
-      }).catch(() => {});
-    },
+    onMount: sh => sh.body.addEventListener('click', e => {
+      const x = e.target.closest('[data-x]')?.dataset.x;
+      if (x === 'sc') {
+        // Bağlantıyı engellemeden kodu panoya koy; Kısayollar sorusunda yapıştırılır.
+        copyText(token).then(ok => toast(ok ? 'Kod kopyalandı, Kısayollar’da yapıştır' : 'Kod kopyalanamadı, elle kopyala'));
+        sh.body.querySelector('[data-step="1"]')?.classList.add('done');
+        haptic('success');
+      }
+      if (x === 'copy') { haptic(); copyText(token).then(ok => toast(ok ? 'Kod kopyalandı' : 'Kopyalanamadı')); }
+    }),
   });
 }
 
@@ -248,6 +260,12 @@ export const pageActs = {
     api.sync();
   },
   widget: () => widgetSheet(),
+  theme: el => {
+    const t = el.dataset.t;
+    haptic();
+    applyTheme(t, true);
+    commit(s => { s.prefs.theme = t; });
+  },
   'backup-copy': async () => { haptic(); toast((await copyText(backupText())) ? 'Yedek panoya kopyalandı' : 'Kopyalanamadı'); },
   'backup-paste': () => pasteBackup(),
   wipe: async () => {

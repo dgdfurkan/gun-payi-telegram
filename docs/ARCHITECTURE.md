@@ -13,7 +13,10 @@
 | `web/js/plan.js` | Gün / Hafta / Ay görünümleri, tamamlama |
 | `web/js/compose.js` | Ekleme sayfası (canlı çözümleme, ses), plan ve not düzenleme |
 | `web/js/pages.js` | Notlar, Özet (haftalık değerlendirme), Ayarlar, widget kurulumu |
-| `web/js/ui.js`, `icons.js`, `voice.js` | Alt sayfa, işlem menüsü, bildirim, titreşim; ikonlar; Web Speech |
+| `web/js/pickers.js` | Takvim, saat çarkı, hatırlatma (özel sn/dk/saat/gün), tekrar, ikon seçici |
+| `web/js/categories.js` | **Ortak:** başlıktan kategori/ikon/emoji tahmini |
+| `web/js/ui.js`, `icons.js`, `voice.js` | Alt sayfa (klavye takibi), işlem menüsü, bildirim, titreşim, tema; ikonlar; Web Speech |
+| `web/kisayol.shortcut`, `web/_headers` | İmzalı iOS kısayolu (widget) ve indirme başlıkları |
 | `web/sw.js` | Kabuk önbelleği (sürüm `web/js/version.js` ile aynı olmalı) |
 | `worker/index.js` | Yönlendirme: `/api/*`, `/telegram/webhook`, `/health`, gerisi statik dosya |
 | `worker/hub.js` | Durable Object `ReminderHub`: `meta` (bağlantı kodları, bot) ve `chat:<id>` (plan aynası, olaylar, alarm) |
@@ -28,9 +31,9 @@ IndexedDB `gun-payi` v1, store `local`, anahtar `state`:
 { schema: 2, revision, onboarded, prefs, items, notes, reviews, sync: { cursor } }
 ```
 
-- **Plan:** `id, title, kind, date ('' = Yapılacaklar), time, endTime, repeat (none|daily|weekly|monthly), weekdays, until, reminders (null = varsayılan), status, exceptions{origin: {status,date,time}}, note`.
+- **Plan:** `id, title, kind, date ('' = Yapılacaklar), time, endTime, repeat (none|daily|weekly|monthly), weekdays, until, reminders (dakika, kesirli = saniye; null = varsayılan), icon ('' = otomatik), status, exceptions{origin: {status,date,time}}, note`.
 - Tekrarlayan planda tek günlük değişiklik `exceptions` içinde tutulur. Bitiş saati başlangıçtan küçükse ertesi güne taşar (16:00–01:00 vardiya).
-- `prefs`: `name, timeZone, reminderDefaults, plannerMode, digest{on,time}, reviewDay`.
+- `prefs`: `name, timeZone, reminderDefaults, plannerMode, digest{on,time}, reviewDay, theme`.
 - Telegram bağlantı anahtarı `localStorage['gp-link']` içindedir, yedeğe girmez.
 
 ## Senkron protokolü
@@ -45,7 +48,8 @@ Senkron yalnız açılışta, değişiklikten 1,5 sn sonra ve uygulama öne geli
 
 - Tek varsayılan bot (`BOT_TOKEN` secret). Bağlanma: `POST /api/link/start` → `{code, secret}` → `t.me/<bot>?start=<code>` → kullanıcı Başlat → webhook kodu `chat:<id>`'ye bağlar → uygulama `link/check` ile `chatId` alır. Anahtar `chatId.secret`, sunucuda yalnız SHA-256 özeti tutulur.
 - Webhook gizli başlığı tokendan türetilir; yalnız özel sohbet ve `from.id === chat.id` kabul edilir; `update_id` tekrarları atlanır.
-- Serbest metin: önce `parse.js`; başlıkta anlaşılmayan zaman kelimesi kalırsa Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON şeması) yedeği. Saatsiz metin Yapılacaklar'a, `not:` ile başlayan nota gider.
+- Serbest metin/ses düğmeli **taslak** olur (`drafts`, 24 saat); `x:<id>:<işlem>` geri çağrıları gün/saat/hatırlatma/tekrarı düzenler, **Ekle** plana yazar. Taslak açıkken yalnız zaman içeren mesaj taslağı düzeltir.
+- Çözümleme: önce `parse.js`; başlıkta anlaşılmayan zaman kelimesi kalırsa Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON şeması) yedeği. Saatsiz metin Yapılacaklar'a, `not:` ile başlayan nota gider.
 - Sesli mesaj: `getFile` → Whisper (`@cf/openai/whisper-large-v3-turbo`, `tr`) → aynı yol.
 - Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı** ve **10 dk ertele** düğmeleri.
 - Alarm: `jobsFor` en yakın işi bulur, `storage.setAlarm`. Gönderilen iş kimlikleri 3 gün tutulur; başarısız gönderim 3 denemeden sonra bırakılır.

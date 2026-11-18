@@ -3,7 +3,7 @@ import { load, get, subscribe, commit } from './store.js';
 import * as api from './api.js';
 import { ctx, today } from './ctx.js';
 import { icon } from './icons.js';
-import { $, $$, esc, haptic } from './ui.js';
+import { $, $$, esc, haptic, applyTheme } from './ui.js';
 import { renderPlan, planActs, bindSwipe } from './plan.js';
 import { openCompose, openItem } from './compose.js';
 import { renderNotes, renderReview, renderSettings, pageActs, onInput, onChange, prepareLink, linkState, watchLink, checkLinkNow, refreshStatus } from './pages.js';
@@ -141,6 +141,7 @@ const welcomeActs = {
 (async () => {
   await load();
   const s = get();
+  applyTheme(s.prefs.theme);
   ctx.mode = s.prefs.plannerMode;
   ctx.day = today();
   shell();

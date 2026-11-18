@@ -96,29 +96,68 @@ test('bağlı olmayan sohbet yönlendirilir', async () => {
   assert.ok(t.calls.some(c => c.method === 'sendMessage' && /Telegram'a bağlan/.test(c.body.text)));
 });
 
-test('Telegram serbest metni plan olur, uygulama olayı senkronla alır', async () => {
+const press = async (t, data) => t.hook({ update_id: updateId++, callback_query: { id: 'cb' + updateId, from: { id: 42 }, data, message: { message_id: 7, chat: { id: 42, type: 'private' } } } });
+const lastSent = t => t.calls.filter(c => c.method === 'sendMessage' || c.method === 'editMessageText').at(-1);
+const btn = (msg, label) => msg.body.reply_markup.inline_keyboard.flat().find(b => b.text.includes(label))?.callback_data;
+
+test('Telegram serbest metni önce taslak olur, Ekle ile plana girer', async () => {
   const t = setup();
   const auth = await linked(t);
   await t.hook(message("Her cuma saat 12'de babaannemi ara, 10 ve 15 dakika önce hatırlat"));
-  const reply = t.calls.filter(c => c.method === 'sendMessage').at(-1);
-  assert.match(reply.body.text, /Babaannemi ara/);
-  assert.match(reply.body.text, /Her Cuma · 12:00/);
-  assert.match(reply.body.text, /10, 15 dk önce/);
-  const first = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
-  assert.equal(first.events.length, 1);
-  assert.equal(first.events[0].type, 'add');
-  const item = first.events[0].item;
+  const draft = lastSent(t);
+  assert.match(draft.body.text, /Taslak/);
+  assert.match(draft.body.text, /📞 <b>Babaannemi ara<\/b>/);
+  assert.match(draft.body.text, /Her Cuma/);
+  assert.match(draft.body.text, /10, 15 dk önce/);
+  let sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  assert.equal(sync.ok, true, 'taslak onaylanmadan plan eklenmez');
+  await press(t, btn(draft, 'Ekle'));
+  assert.match(lastSent(t).body.text, /✅/);
+  sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  assert.equal(sync.events.length, 1);
+  const item = sync.events[0].item;
   assert.deepEqual(item.weekdays, [5]);
   assert.deepEqual(item.reminders, [15, 10]);
-  const second = await (await t.call('/api/sync', { auth, body: { cursor: first.cursor, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } })).json();
+  const second = await (await t.call('/api/sync', { auth, body: { cursor: sync.cursor, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } })).json();
   assert.equal(second.ok, true);
   assert.ok(t.hubs.get('chat:42').store.alarm > Date.now());
+});
+
+test('taslak düğmelerle ve yazarak düzeltilir', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  await t.hook(message('Spor'));
+  const draft = lastSent(t);
+  await press(t, btn(draft, 'Saat'));
+  const timeMenu = lastSent(t);
+  assert.ok(btn(timeMenu, '19:00'));
+  await press(t, btn(timeMenu, '19:00'));
+  assert.match(lastSent(t).body.text, /🕐 19:00/);
+  await press(t, btn(lastSent(t), 'Hatırlat'));
+  await press(t, btn(lastSent(t), '1 dk'));
+  assert.match(lastSent(t).body.text, /1, 10 dk önce/);
+  await press(t, btn(lastSent(t), 'Geri'));
+  await press(t, btn(lastSent(t), 'Tekrar'));
+  await press(t, btn(lastSent(t), 'Hafta içi'));
+  assert.match(lastSent(t).body.text, /Hafta içi her gün/);
+  await t.hook(message("yarın 10'da"));
+  const fixed = lastSent(t);
+  assert.match(fixed.body.text, /Yarın/);
+  assert.match(fixed.body.text, /🕐 10:00/);
+  await press(t, btn(fixed, 'Ekle'));
+  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  assert.equal(sync.events[0].item.time, '10:00');
+  assert.equal(sync.events[0].item.repeat, 'none');
+  await t.hook(message('Kitap oku'));
+  await press(t, btn(lastSent(t), 'Vazgeç'));
+  assert.match(lastSent(t).body.text, /✖️/);
 });
 
 test('saatsiz metin yapılacaklara düşer, not komutu not olur', async () => {
   const t = setup();
   const auth = await linked(t);
   await t.hook(message('Ekmek al'));
+  await press(t, btn(lastSent(t), 'Ekle'));
   await t.hook(message('/not Widget fikri'));
   const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events[0].item.date, '');
@@ -145,9 +184,10 @@ test('sesli mesaj Whisper ile yazıya çevrilir', async () => {
   await linked(t);
   await t.hook(message(undefined, { voice: { file_id: 'v1', duration: 3, file_size: 1000 } }));
   assert.ok(t.calls.some(c => c.ai?.includes('whisper') && c.input.language === 'tr'));
-  const reply = t.calls.filter(c => c.method === 'sendMessage').at(-1);
+  const reply = lastSent(t);
   assert.match(reply.body.text, /🎙/);
   assert.match(reply.body.text, /Babaannemi ara/);
+  assert.match(reply.body.text, /Taslak/);
 });
 
 test('kuralların anlamadığı cümle AI yedeğine gider', async () => {
@@ -169,12 +209,12 @@ test('alarm zamanı gelen hatırlatmayı gönderir, düğme tamamlar', async () 
   const hub = t.hubs.get('chat:42');
   await hub.alarm();
   const sent = t.calls.filter(c => c.method === 'sendMessage').at(-1);
-  assert.match(sent.body.text, /⏰ <b>İlaç<\/b>/);
+  assert.match(sent.body.text, /💊 <b>İlaç<\/b>/);
   const done = sent.body.reply_markup.inline_keyboard[0][0].callback_data;
   assert.equal(done, `d:i1:${day}`);
   await hub.alarm();
   assert.equal(t.calls.filter(c => c.method === 'sendMessage' && /İlaç/.test(c.body.text)).length, 1, 'aynı hatırlatma iki kez gitmez');
-  await t.hook({ update_id: updateId++, callback_query: { id: 'cb', from: { id: 42 }, data: done, message: { message_id: 7, chat: { id: 42, type: 'private' } } } });
+  await press(t, done);
   const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: {} } })).json();
   assert.equal(sync.events.at(-1).type, 'patch');
   assert.equal(sync.events.at(-1).patch.status, 'done');
