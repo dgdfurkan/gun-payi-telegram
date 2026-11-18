@@ -17,13 +17,15 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - `npm test`: 49 test (çözümleyici 31, uygulama 7, Worker 11; Telegram ve AI sahte yanıtla).
 - `wrangler deploy --dry-run` paketleme ve bağlamalar.
 - `wrangler dev` ile 375×667 tarayıcıda karşılama, ekleme, çip düzenleme, tamamlama, düzenleme, hafta/ay, notlar, özet, ayarlar; açık ve koyu tema.
+- Canlı (18 Kasım): sürüm 5.0.0 `wrangler deploy` ile yayında, `BOT_TOKEN` tanımlı (bot: @hatirlat_gunduz_bot), webhook kuruldu. Kullanıcı telefondan bağlandı ve anlık deneme mesajını aldı.
+- Not: Cloudflare Workers Builds `main` push'larında derleme tetiklemiyor (son otomatik derleme ilk kurulumdaydı). Yayın şimdilik bu Mac'ten `npx wrangler deploy`.
 
 ## Henüz doğrulanmayanlar
 
 Bunlar gerçek cihaz/hesap ister, yapıldı denmemeli:
 
-1. Cloudflare'de `BOT_TOKEN` secret'ı tanımlanınca gerçek bağlanma ve mesaj teslimi.
-2. Uygulama kapalıyken zamanlı hatırlatma ve Mi Band'e ulaşması.
+1. Uygulama kapalıyken zamanlı hatırlatma ("1 dk sonra dene" ve gerçek plan).
+2. Mesajın Mi Band'e ulaşması.
 3. Whisper'ın Telegram OGG/Opus sesini çözmesi ve Llama JSON modunun gerçek yanıtı.
 4. iPhone'da mikrofon izni davranışı, klavye dikte, iOS 18+ titreşim, açılış ekranı.
 5. Kısayollar widget'ı ile `/api/quick` (elle kurulum; imzalı `.shortcut` dosyası henüz yok).
