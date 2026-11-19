@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **19 Kasım 2026**. Sürüm **5.6.0**.
+Güncelleme: **19 Kasım 2026**. Sürüm **5.6.1**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,13 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.6.1
+
+- Kısayoldan gelen "Bugün saat 3'te … 3 kere hatırlat" cümlesinin tamamı başlık olmuştu. iOS metni ayrık Unicode (ü = u + ¨) ve farklı kesme işaretleriyle (ʼ ′) gönderebiliyor; çözümleyici artık girdiyi NFC'ye çevirip kesme işaretlerini birleştiriyor (`normText`). Kesin sebep sunucu verisine bakılmadan doğrulanamadı; bu iki durum yerelde aynı sonucu üretiyordu.
+- "3 kere hatırlat" ("tekrar" demeden) tekrar hatırlatma olur.
+- Başlıkta "yükleyeceğim / arayacağım / ödemeliyim" → "yükle / ara / öde".
+- AI yedeğinin başlığı da kural temizliğinden geçer (cümlenin tamamını başlık yaparsa zaman ve komut kelimeleri ayıklanır).
 
 ## 5.6
 
@@ -64,7 +71,7 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 
 ## Doğrulananlar
 
-- `npm test`: 70 test (çözümleyici, uygulama, Worker; Telegram ve AI sahte yanıtla).
+- `npm test`: 72 test (çözümleyici, uygulama, Worker; Telegram ve AI sahte yanıtla).
 - `wrangler deploy --dry-run` paketleme ve bağlamalar.
 - `wrangler dev` ile 375×667 tarayıcıda karşılama, ekleme, çip düzenleme, tamamlama, düzenleme, hafta/ay, notlar, özet, ayarlar; açık ve koyu tema.
 - Canlı (18 Kasım): sürüm 5.0.0 `wrangler deploy` ile yayında, `BOT_TOKEN` tanımlı (bot: @hatirlat_gunduz_bot), webhook kuruldu. Kullanıcı telefondan bağlandı ve anlık deneme mesajını aldı.

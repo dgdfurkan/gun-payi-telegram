@@ -1,5 +1,6 @@
 // Cloudflare Workers AI: ses → metin (Whisper) ve kuralların anlamadığı cümleler için yedek çözümleme.
 import { dayAt, clockAt, weekday, DAY_NAMES, isDate, isTime, fromMin } from '../web/js/core.js';
+import { parse } from '../web/js/parse.js';
 
 const TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const VOICE_MODEL = '@cf/openai/whisper-large-v3-turbo';
@@ -58,7 +59,8 @@ export async function aiParse(env, text, { now = Date.now(), tz = 'Europe/Istanb
     if (!r || typeof r.title !== 'string' || !r.title.trim()) return null;
     const out = { ...(fallback || {}), ai: true };
     out.kind = ['task', 'event', 'note'].includes(r.kind) ? r.kind : 'task';
-    out.title = r.title.trim().slice(0, 300);
+    const raw = r.title.trim().slice(0, 300);
+    out.title = out.kind === 'note' ? raw : (parse(raw, { now, tz }).title || raw);
     out.date = isDate(r.date) ? r.date : '';
     out.time = isTime(r.time) ? r.time : '';
     out.endTime = out.time && isTime(r.endTime) ? r.endTime : '';

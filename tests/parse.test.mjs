@@ -151,3 +151,20 @@ test('göreli saat: "20 dakika sonra", "2 saat sonra"', () => {
   assert.deepEqual(p('20 dakika sonra ilaç, 10 dakikada bir 3 kere hatırlat').nag, { every: 10, times: 3 });
   assert.deepEqual(p('20 dakika sonra toplantı, 5 dakika önce hatırlat').reminders, [5]);
 });
+
+test('iOS metni: ayrık harfler ve farklı kesme işaretleri', () => {
+  const s = "Bugün saat 3'te Engin abilere Reels videosu yükleyeceğim 3 kere hatırlat";
+  for (const t of [s, s.normalize('NFD'), s.replace("'", 'ʼ').normalize('NFD'), s.replace("'", '′')]) {
+    const r = p(t);
+    assert.deepEqual([r.title, r.date, r.time, r.nag], ['Engin abilere Reels videosu yükle', '2026-11-18', '15:00', { every: 10, times: 3 }], JSON.stringify(t));
+  }
+  assert.deepEqual(parseDurations('1 gün 5 saat'.normalize('NFD')), [1740]);
+});
+
+test('gelecek zaman ve "-meliyim" başlıkta emre döner', () => {
+  assert.equal(p("Yarın akşam 8'de babaannemi arayacağım").title, 'Babaannemi ara');
+  assert.equal(p('Cuma 10da faturayı ödemeliyim').title, 'Faturayı öde');
+  assert.equal(p("Yarın 9'da okula gideceğim").title, 'Okula git');
+  assert.equal(p('akşam 8de balıkların suyu değiştirilecek').title, 'Balıkların suyu değiştirilecek');
+  assert.deepEqual(p("Yarın 3'te dişçi, 3 kere hatırlat").nag, { every: 10, times: 3 });
+});

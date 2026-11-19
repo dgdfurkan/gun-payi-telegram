@@ -27,6 +27,8 @@ export function wordNum(w) {
   if (w) { const u = UNITS.indexOf(w); if (u < 0) return NaN; n += u + 1; }
   return n;
 }
+// iOS dikte/Kısayollar metni ayrık harflerle (u + ¨) ve farklı kesme işaretleriyle (ʼ ′ ＇) gelebilir.
+export const normText = v => String(v || '').normalize('NFC').replace(/[\u2018\u2019\u201B\u02BC\u02B9\u2032\uFF07`´]/gu, "'");
 const mapMonth = w => { const n = MONTHS.indexOf(w); return n >= 0 ? n : { subat: 1, mayis: 4, agustos: 7, eylul: 8, kasim: 10, aralik: 11 }[w]; };
 
 class Text {
@@ -72,7 +74,7 @@ export function parse(input, opts = {}) {
   const tz = opts.tz || TZ_DEFAULT;
   const now = opts.now ?? Date.now();
   const { day: today, minutes: nowMin } = clockAt(now, tz);
-  const raw = String(input || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  const raw = normText(input).replace(/\s+/g, ' ').trim().slice(0, 500);
   const t = new Text(raw);
   const out = { kind: 'task', title: '', date: '', time: '', endTime: '', repeat: 'none', weekdays: [], reminders: null, nag: null, timeGuess: false, doubt: [] };
   const found = { date: false, time: false, repeat: false, reminders: false, nag: false };
@@ -333,11 +335,11 @@ export const NAG_PATTERNS = [
   // "her 10 dakikada bir tekrar hatırlat" (sayı yoksa 3 kez)
   [`(?:her\\s+)?(${NUM}|yarım)\\s*${NAGU}${NAGSEP}\\s+${NAGHAT}`, m => nagValue(m[1].trim(), m[2], null)],
   // "5 kere tekrar hatırlat", "tekrar hatırlat" (aralık yoksa 10 dk)
-  [`${NAGC}\\s+(?:tekrar|yine|tekrardan)\\s+hatırlat\\p{L}*|(?:tekrar|yine|tekrardan)\\s+hatırlat\\p{L}*(?:\\s+${NAGC})?`, m => nagValue('10', 'dk', m[1] ?? m[2] ?? null)],
+  [`${NAGC}\\s+(?:(?:tekrar|yine|tekrardan)\\s+)?hatırlat\\p{L}*|(?:tekrar|yine|tekrardan)\\s+hatırlat\\p{L}*(?:\\s+${NAGC})?`, m => nagValue('10', 'dk', m[1] ?? m[2] ?? null)],
 ];
 // Yalnız tekrar ifadesi yazıldığında (Telegram taslağı): {every, times} | null
 export function parseNag(input) {
-  const s = String(input || '').trim().toLocaleLowerCase('tr');
+  const s = normText(input).trim().toLocaleLowerCase('tr');
   if (/^(tekrar\s+)?(yok|kapat|kapalı|istemiyorum|hayır)$/u.test(s)) return false;
   for (const [pattern, pick] of NAG_PATTERNS) {
     const m = s.match(new RegExp(B + '(?:' + pattern + ')' + E, 'u'));
@@ -361,6 +363,8 @@ export function cleanTitle(text) {
   s = s.replace(/\s+(?:için\s+)?(?:gerekli|gereken)\s+(?:olan\s+)?(?:şeyi|şeyleri|şey|hatırlatmayı|hatırlatıcıyı)/giu, ' için');
   s = s.replace(/(\p{L}{2,}?)(?:mam|mem|mamız|memiz|mamı|memi)\s+(?:için|lazım|gerek\p{L}*)(?![\p{L}])/giu, '$1');
   s = s.replace(/(\p{L}{2,}?)(?:mayı|meyi)\s+unutma\p{L}*/giu, '$1');
+  s = s.replace(/(^|\s)(?:yiyeceğim|diyeceğim|gideceğim|edeceğim)(?![\p{L}])/giu, (m, a) => a + { yiyeceğim: 'ye', diyeceğim: 'de', gideceğim: 'git', edeceğim: 'et' }[m.trim().toLocaleLowerCase('tr')]);
+  s = s.replace(/(\p{L}{2,}?)y?(?:acağım|eceğim|malıyım|meliyim)(?![\p{L}])/giu, '$1');
   s = s.replace(/(\p{L}{2,}?)(?:mak|mek)\s+(?:lazım|gerek\p{L}*|istiyorum)(?![\p{L}])/giu, '$1');
   s = s.replace(/\s+(?:ekler|ekleyebilir|ekleyiver|hatırlatır|hatırlatabilir|kurar|ayarlar)\s+m[iıuü]s[iıuü]n\s*\??/giu, ' ');
   s = s.replace(/\s+(?:bir\s+)?(?:hatırlatma|hatırlatıcı|alarm)\s+(?:kur|ekle|ayarla|oluştur)\p{L}*/giu, ' ');
@@ -404,7 +408,7 @@ export const parseDay = (now, tz) => dayAt(now, tz);
 // "15 sn", "vaktinde ve 10 dk". Anlaşılmazsa null, "yok" için [].
 const DUR_UNIT = { saniye: 1 / 60, sn: 1 / 60, dakika: 1, dakka: 1, dk: 1, dak: 1, d: 1, saat: 60, sa: 60, s: 60, gün: 1440, g: 1440, hafta: 10080, hf: 10080 };
 export function parseDurations(input) {
-  let s = String(input || '').toLocaleLowerCase('tr').replace(/[’'`]/g, ' ').replace(/(önce\p{L}*|kala|hatırlat\p{L}*|kadar)/gu, ' ').trim();
+  let s = normText(input).toLocaleLowerCase('tr').replace(/[’'`]/g, ' ').replace(/(önce\p{L}*|kala|hatırlat\p{L}*|kadar)/gu, ' ').trim();
   if (!s) return null;
   if (/^(yok|hiç|kapat|hatırlatma yok|istemiyorum)$/u.test(s)) return [];
   const out = new Set();
@@ -438,7 +442,7 @@ export function parseDurations(input) {
 
 // Yalnız saat yazıldığında: "17:34", "17.34", "17 34", "1734", "17", "saat 5", "akşam 8".
 export function parseClock(input, opts = {}) {
-  const s = String(input || '').trim().toLocaleLowerCase('tr');
+  const s = normText(input).trim().toLocaleLowerCase('tr');
   let m = s.match(/^(\d{1,2})\s*[:.,\s]\s*(\d{2})$/) || s.match(/^(\d{2})(\d{2})$/) || s.match(/^(\d)(\d{2})$/);
   if (m && +m[1] < 24 && +m[2] < 60) return `${pad(+m[1])}:${pad(+m[2])}`;
   m = s.match(/^(\d{1,2})$/);
