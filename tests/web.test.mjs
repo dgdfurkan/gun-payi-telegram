@@ -92,3 +92,16 @@ test('service worker kabuk listesi ve sürüm tutarlı', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.version, VERSION);
 });
+
+test('tekrar hatırlatma tamamlanana kadar iş üretir', () => {
+  const start = zonedMs('2026-11-18', '20:00', 'Europe/Istanbul');
+  let i = item({ time: '20:00', reminders: [10], nag: { every: 10, times: 5 } });
+  assert.deepEqual(cleanItem(i).nag, { every: 10, times: 5 });
+  assert.equal(cleanItem({ ...i, nag: { every: 0, times: 5 } }).nag, null);
+  const jobs = jobsFor([i], {}, start - 15 * 60000, 1).filter(j => j.origin === '2026-11-18');
+  assert.deepEqual(jobs.map(j => (j.due - start) / 60000).sort((a, b) => a - b), [-10, 0, 10, 20, 30, 40, 50]);
+  assert.deepEqual(jobs.filter(j => j.nag).map(j => j.nag).sort(), [1, 2, 3, 4, 5]);
+  assert.ok(jobsFor([i], {}, start + 35 * 60000, 1).some(j => j.nag === 4), 'saat geçse de tekrarlar sürer');
+  i = patchOccurrence(i, '2026-11-18', { status: 'done' });
+  assert.equal(jobsFor([i], {}, start + 5 * 60000, 1).filter(j => j.origin === '2026-11-18').length, 0, 'tamamlanınca durur');
+});

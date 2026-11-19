@@ -50,9 +50,11 @@ Senkron yalnız açılışta, değişiklikten 1,5 sn sonra ve uygulama öne geli
 - Tek varsayılan bot (`BOT_TOKEN` secret). Bağlanma: `POST /api/link/start` → `{code, secret}` → `t.me/<bot>?start=<code>` → kullanıcı Başlat → webhook kodu `chat:<id>`'ye bağlar → uygulama `link/check` ile `chatId` alır. Anahtar `chatId.secret`, sunucuda yalnız SHA-256 özeti tutulur.
 - Webhook gizli başlığı tokendan türetilir; yalnız özel sohbet ve `from.id === chat.id` kabul edilir; `update_id` tekrarları atlanır.
 - Serbest metin/ses düğmeli **taslak** olur (`drafts`, 24 saat); `x:<id>:<işlem>` geri çağrıları gün/saat/hatırlatma/tekrarı düzenler, **Ekle** plana yazar. Taslak açıkken yalnız zaman içeren mesaj taslağı düzeltir.
+- Hatırlatma mesajı sadedir: emoji, iş, planın saati (başka günse gün etiketi). Not: başta `Not`/`Not al`/`Not olarak ekle` ya da sonda `not olarak ekle`, metin olduğu gibi saklanır. Göreli saat (`N dakika/saat sonra`) o anın üstüne eklenir.
 - Çözümleme: önce `parse.js`; başlıkta anlaşılmayan zaman kelimesi kalırsa Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON şeması) yedeği. Saatsiz metin Yapılacaklar'a, `not:` ile başlayan nota gider.
 - Sesli mesaj: `getFile` → Whisper (`@cf/openai/whisper-large-v3-turbo`, `tr`) → aynı yol.
-- Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı** ve **10 dk ertele** düğmeleri.
+- Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı** ve **Ertele** düğmeleri. Ertele menüsü: 10 dk, 20 dk, 30 dk, 1 saat, 2 saat, Yarın, ✏️ Süre yaz (`snoozeAwait`: sıradaki mesaj `parseDurations` / tarih / `parseClock` ile okunur, 15 dk geçerli). Erteleme gerçekleşme başına tektir; yenisi eskisinin yerine geçer.
+- Tekrar hatırlatma (`item.nag = {every, times}`): `jobsFor` plan saatine ve sonrasına `n1..nN` işleri ekler; tamamlanınca üretilmez. Alarm aynı gerçekleşmede geciken işlerden yalnız sonuncusunu gönderir, önceki hatırlatma mesajını siler (`msgs` türü `r`). Ertelenmiş gerçekleşmede ara tekrarlar susar.
 - Alarm: `jobsFor` en yakın işi bulur, `storage.setAlarm`. Gönderilen iş kimlikleri 3 gün tutulur; başarısız gönderim 3 denemeden sonra bırakılır.
 
 ## API

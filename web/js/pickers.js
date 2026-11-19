@@ -70,6 +70,23 @@ export function bindWheel(root, onChange) {
 // ---------- Hatırlatma ----------
 export const REM_PRESETS = [[0, 'Vaktinde'], [1, '1 dk'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [120, '2 saat'], [1440, '1 gün']];
 const UNITS = { sn: 1 / 60, dk: 1, sa: 60, gün: 1440 };
+// Tamamlanmazsa tekrar hatırlat: aralık ve kaç kez
+const NAG_EVERY = [[0, 'Kapalı'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 sa']];
+const NAG_TIMES = [2, 3, 5, 10];
+export function nagHTML(nag) {
+  const ev = nag?.every || 0, tm = nag?.times || 3;
+  const chip = (attr, v, l, on) => `<button type="button" class="chip ${on ? 'on' : ''}" data-${attr}="${v}">${l}</button>`;
+  const evs = NAG_EVERY.some(([v]) => v === ev) ? NAG_EVERY : [...NAG_EVERY, [ev, ev % 60 ? ev + ' dk' : ev / 60 + ' sa']];
+  const tms = NAG_TIMES.includes(tm) ? NAG_TIMES : [...NAG_TIMES, tm].sort((a, b) => a - b);
+  return `<div class="pk-sub nag-h">${icon('again')}Tamamlanmazsa tekrar hatırlat</div>
+    <div class="picker-row">${evs.map(([v, l]) => chip('nag-every', v, l, ev === v)).join('')}</div>
+    ${ev ? `<div class="picker-row">${tms.map(n => chip('nag-times', n, n + ' kez', tm === n)).join('')}</div>` : ''}`;
+}
+export function applyNag(nag, btn) {
+  if ('nagEvery' in btn.dataset) { const e = +btn.dataset.nagEvery; return e ? { every: e, times: nag?.times || 3 } : null; }
+  if ('nagTimes' in btn.dataset && nag) return { ...nag, times: +btn.dataset.nagTimes };
+  return nag || null;
+}
 export function reminderHTML(list) {
   const presets = REM_PRESETS.map(([v]) => v);
   const extra = list.filter(v => !presets.includes(v)).sort((a, b) => a - b);

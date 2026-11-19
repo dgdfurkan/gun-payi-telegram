@@ -317,3 +317,88 @@ test('sağlık ve statik dosya yönlendirmesi', async () => {
   t.env.ASSETS = { fetch: () => new Response('index') };
   assert.equal(await (await t.call('/', { method: 'GET' })).text(), 'index');
 });
+
+const realNow = Date.now;
+const at = ms => { Date.now = () => ms; };
+const edits = t => t.calls.filter(c => c.method === 'editMessageReplyMarkup');
+
+test('tamamlanmayan plan tekrar hatırlatılır, sohbette tek hatırlatma kalır', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  const base = realNow();
+  try {
+    const { day, minutes } = clockAt(base - 25 * 60000, 'Europe/Istanbul');
+    const item = { id: 'n1', title: 'Balıkların suyu', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [], nag: { every: 10, times: 5 }, status: 'pending', exceptions: {} };
+    await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+    const hub = t.hubs.get('chat:42');
+    await hub.alarm();
+    const nags = () => t.calls.filter(c => c.method === 'sendMessage' && /Balıkların/.test(c.body.text));
+    assert.equal(nags().length, 1, 'kaçırılan tekrarlar tek mesajda toplanır');
+    assert.equal(nags()[0].body.text, `🐾 <b>Balıkların suyu</b>\n${item.time}`, 'sade: yalnız iş ve saati');
+    assert.ok(btn(nags()[0], 'Ertele'));
+    at(base + 11 * 60000);
+    await hub.alarm();
+    assert.equal(nags().length, 2);
+    assert.equal(nags()[1].body.text, nags()[0].body.text, 'kaçıncı tekrar olduğu yazmaz');
+    assert.ok(deleted(t).includes(nags()[0].id), 'önceki hatırlatma silinir');
+    await press(t, btn(nags()[1], 'Tamamlandı'), nags()[1].id);
+    at(base + 40 * 60000);
+    await hub.alarm();
+    assert.equal(nags().length, 2, 'tamamlanınca tekrar durur');
+  } finally { Date.now = realNow; }
+});
+
+test('Ertele menüsü: hazır süreler ve yazarak süre', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  const base = realNow();
+  try {
+    const { day, minutes } = clockAt(base + 2 * 60000, 'Europe/Istanbul');
+    const item = { id: 's1', title: 'Fatura öde', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], nag: { every: 10, times: 3 }, status: 'pending', exceptions: {} };
+    await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+    const hub = t.hubs.get('chat:42');
+    await hub.alarm();
+    const rem = t.calls.filter(c => c.method === 'sendMessage').at(-1);
+    await press(t, btn(rem, 'Ertele'), rem.id);
+    const menu = edits(t).at(-1).body.reply_markup.inline_keyboard.flat().map(b => b.text);
+    for (const l of ['10 dk', '20 dk', '30 dk', '1 saat', '2 saat', 'Yarın', 'Süre yaz', 'Geri']) assert.ok(menu.some(x => x.includes(l)), l);
+    await press(t, `z:s1:${day}:60`, rem.id);
+    assert.equal(hub.s.snooze.length, 1);
+    assert.ok(Math.abs(hub.s.snooze[0].due - (base + 3600000)) < 5000);
+    assert.match(edits(t).at(-1).body.reply_markup.inline_keyboard.flat().map(b => b.text).join(' '), /⏰ \d\d:\d\d/);
+    await press(t, `w:s1:${day}`, rem.id);
+    const prompt = t.calls.filter(c => c.method === 'sendMessage').at(-1);
+    assert.match(prompt.body.text, /Ne zaman tekrar/);
+    await t.hook(message('anlamsız'));
+    assert.match(lastSent(t).body.text, /Süreyi anlayamadım/);
+    await t.hook(message('1 gün 5 saat'));
+    assert.equal(hub.s.snooze.length, 1, 'yeni erteleme eskisinin yerine geçer');
+    assert.ok(Math.abs(hub.s.snooze[0].due - (base + 29 * 3600000)) < 5000);
+    assert.ok(deleted(t).includes(prompt.id), 'soru mesajı silinir');
+    assert.equal(hub.s.snoozeAwait, null);
+    const before = t.calls.filter(c => c.method === 'sendMessage').length;
+    at(base + 30 * 60000);
+    await hub.alarm();
+    assert.equal(t.calls.filter(c => c.method === 'sendMessage').length, before, 'ertelenmişken ara tekrarlar susar');
+    at(base + 29 * 3600000 + 1000);
+    await hub.alarm();
+    const late = t.calls.filter(c => c.method === 'sendMessage').at(-1);
+    assert.match(late.body.text, /Fatura öde/);
+    assert.match(late.body.text, new RegExp(`^💳 <b>Fatura öde</b>\\n(?:.+ )?${item.time}$`), 'ertelenen de sade: iş ve planın saati');
+    assert.ok(deleted(t).includes(rem.id), 'eski hatırlatma yerini yenisine bırakır');
+  } finally { Date.now = realNow; }
+});
+
+test('taslakta tekrar hatırlatma düğmeyle ve yazarak seçilir', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  await t.hook(message("yarın 20'de balıkların suyunu değiştir"));
+  await press(t, btn(lastSent(t), 'Hatırlat'));
+  await press(t, btn(lastSent(t), '10dk×5'));
+  assert.match(lastSent(t).body.text, /🔁 Tamamlanmazsa 10 dk'da bir · 5 kez/);
+  await t.hook(message('yarım saat arayla 2 kez'));
+  assert.match(lastSent(t).body.text, /30 dk'da bir · 2 kez/);
+  await press(t, btn(lastSent(t), 'Ekle'));
+  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  assert.deepEqual(sync.events[0].item.nag, { every: 30, times: 2 });
+});

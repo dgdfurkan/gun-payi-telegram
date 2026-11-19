@@ -1,6 +1,6 @@
 // Ekleme (doğal dil + ses), plan düzenleme ve not sayfaları.
 import { parse, toItem } from './parse.js';
-import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, summary, weekday, uid, occurrence, patchOccurrence, shortDate, statusOf, DAY_NAMES } from './core.js';
+import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, nagShort, summary, weekday, uid, occurrence, patchOccurrence, shortDate, statusOf, DAY_NAMES } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
 import { $, $$, esc, haptic, toast, sheet, actions, confirmDanger } from './ui.js';
@@ -8,7 +8,7 @@ import { ctx, today, tz } from './ctx.js';
 import { startDictation, stopDictation, abortDictation, listening, voiceSupported } from './voice.js';
 import { link, aiParse, sync } from './api.js';
 import { catOf } from './categories.js';
-import { calendarHTML, shiftMonth, quickDays, wheelHTML, bindWheel, reminderHTML, handleCustom, toggleReminder, repeatHTML, applyRepeat, toggleWeekday, tile, iconGridHTML } from './pickers.js';
+import { calendarHTML, shiftMonth, quickDays, wheelHTML, bindWheel, reminderHTML, nagHTML, applyNag, handleCustom, toggleReminder, repeatHTML, applyRepeat, toggleWeekday, tile, iconGridHTML } from './pickers.js';
 
 const EXAMPLES = [["Her cuma 12'de babaannemi ara", 'phone'], ["Yarın 9'da spor, 10 dk önce", 'run'], ['Hafta içi 07:30 ilaç', 'pill'], ['Her gün 21:00 kitap oku', 'book'], ['Ekmek al', 'cart']];
 const whenLabel = (p, t) => (p.repeat !== 'none' ? repeatLabel(p) : p.date ? dayLabel(p.date, t) : 'Yapılacaklar');
@@ -83,6 +83,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       `<button type="button" class="chip ${p.time ? '' : 'off'} ${st.picker === 'time' ? 'act' : ''} ${p.timeGuess && !st.locks.time ? 'guess' : ''} ${changed('time') ? 'flash' : ''}" data-pick="time">${icon('clock')}${p.time ? (p.endTime ? `${p.time}–${p.endTime}` : p.time) : 'Saat ekle'}</button>`,
     ];
     if (p.time) chips.push(`<button type="button" class="chip ${rem.length ? '' : 'off'} ${st.picker === 'remind' ? 'act' : ''} ${changed('reminders') ? 'flash' : ''}" data-pick="remind">${icon('bell')}${esc(rem.length ? remindersLabel(rem) : 'Hatırlatma yok')}</button>`);
+    if (p.time && p.nag) chips.push(`<button type="button" class="chip ${st.picker === 'remind' ? 'act' : ''} ${changed('nag') ? 'flash' : ''}" data-pick="remind">${icon('again')}${esc(nagShort(p.nag))}</button>`);
     if (st.ai) chips.push(`<span class="chip ai">${icon('sparkle')}AI</span>`);
     pv.innerHTML = `<div class="pv-title"><button type="button" class="pv-ico" data-pick="icon" aria-label="İkon seç">${tile(key)}</button><span>${esc(p.title || '…')}</span></div><div class="chips">${chips.join('')}</div>`;
   }
@@ -99,7 +100,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
     } else if (name === 'time') {
       html = `${wheelHTML(p.time)}<div class="picker-row center"><button type="button" class="chip" data-time-clear>Saati kaldır</button></div>`;
     } else if (name === 'remind') {
-      html = reminderHTML(p.reminders ?? get().prefs.reminderDefaults);
+      html = reminderHTML(p.reminders ?? get().prefs.reminderDefaults) + nagHTML(p.nag);
     } else if (name === 'icon') {
       html = iconGridHTML(st.over.icon ?? '', catOf({ title: p.title, icon: '' }));
     }
@@ -145,6 +146,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
     if (b.dataset.wday) { setOver('weekdays', toggleWeekday(p, +b.dataset.wday).weekdays); haptic(); return refreshPicker(); }
     if ('timeClear' in b.dataset) { setOver('time', ''); setOver('endTime', ''); haptic(); closePicker(); return renderPreview(null); }
     if (b.dataset.rem) { setOver('reminders', toggleReminder(p.reminders ?? get().prefs.reminderDefaults, b.dataset.rem)); haptic(); return refreshPicker(); }
+    if ('nagEvery' in b.dataset || 'nagTimes' in b.dataset) { setOver('nag', applyNag(p.nag, b)); haptic(); return refreshPicker(); }
     if (b.dataset.rc || b.dataset.unit) {
       const v = handleCustom(b);
       if (v !== null) { const cur = p.reminders ?? get().prefs.reminderDefaults; if (!cur.includes(v)) setOver('reminders', [...cur, v]); haptic('success'); refreshPicker(); }
@@ -186,7 +188,8 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
     stopDictation();
     ta.blur();
     if (st.kind === 'note') {
-      const note = { id: uid(), text: value.replace(/^not\s*:\s*/i, ''), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const r = parse(value, { tz: tz() });
+      const note = { id: uid(), text: (r.kind === 'note' && r.title) || value, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await commit(s => { s.notes.unshift(note); });
       haptic('success'); sh.close();
       toast('Not eklendi', { label: 'Geri al', run: () => commit(s => { s.notes = s.notes.filter(n => n.id !== note.id); }) });
@@ -239,7 +242,7 @@ export function openItem(id, origin) {
     </div>
     ${d.date ? `<div class="group" style="margin-top:14px">${row('rep', 'repeat', 'Tekrar', d.repeat === 'none' ? 'Yok' : esc(repeatLabel(d)))}
       ${open === 'rep' ? `<div class="exp in">${repeatHTML(d)}</div>` : ''}</div>` : ''}
-    ${d.time ? `<div class="section-h">Telegram hatırlatması</div><div class="group pad">${reminderHTML(remSel())}</div>` : ''}
+    ${d.time ? `<div class="section-h">Telegram hatırlatması</div><div class="group pad">${reminderHTML(remSel())}${nagHTML(d.nag)}</div>` : ''}
     <div class="section-h">Not</div><div class="group"><textarea class="note-input" data-f="note" placeholder="Ayrıntı ekle" rows="3">${esc(d.note || '')}</textarea></div>
     <div class="group"><button type="button" class="cell" data-x="done"><span class="cell-ic green">${icon(isDone ? 'undo' : 'check')}</span><span class="cell-label">${isDone ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı'}${occ ? `<small>Sadece ${esc(dayLabel(occ.date, t))}</small>` : ''}</span></button></div>
     ${occ ? `<div class="section-h">Sadece ${esc(dayLabel(occ.date, t))}</div><div class="group">
@@ -278,6 +281,7 @@ export function openItem(id, origin) {
     if (b.dataset.rep) { d = applyRepeat(d, b.dataset.rep, t); haptic(); return rerender(); }
     if (b.dataset.wday) { d = toggleWeekday(d, +b.dataset.wday); haptic(); return rerender(); }
     if (b.dataset.rem) { d.reminders = toggleReminder(remSel(), b.dataset.rem); haptic(); return rerender(); }
+    if ('nagEvery' in b.dataset || 'nagTimes' in b.dataset) { d.nag = applyNag(d.nag, b); haptic(); return rerender(); }
     if (b.dataset.rc || b.dataset.unit) { const v = handleCustom(b); if (v !== null && !remSel().includes(v)) { d.reminders = [...remSel(), v]; haptic('success'); rerender(); } return; }
     if (x === 'notime') { d.time = ''; d.endTime = ''; open = ''; return rerender(); }
     if (x === 'noend') { d.endTime = ''; open = ''; return rerender(); }

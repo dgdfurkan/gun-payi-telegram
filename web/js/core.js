@@ -106,9 +106,12 @@ export function jobsFor(items, prefs, now = Date.now(), days = 8) {
   const out = [], seen = new Set(), today = dayAt(now, tz);
   for (const item of items) {
     if (!item.date || !item.time) continue;
-    const rem = item.reminders ?? defaults;
+    const nag = cleanNag(item.nag);
+    // Tekrar varken plan saatinde de haber verilir; sonra her `every` dakikada `times` kez daha.
+    const rem = nag ? [...new Set([...(item.reminders ?? defaults), 0])] : (item.reminders ?? defaults);
     if (!rem.length) continue;
     const maxBefore = Math.max(...rem);
+    const after = nag ? nag.every * nag.times : 0;
     const origins = new Set();
     if (item.repeat === 'none') origins.add(item.date);
     else {
@@ -123,14 +126,16 @@ export function jobsFor(items, prefs, now = Date.now(), days = 8) {
       if (o.status !== 'pending' && o.status !== undefined) continue;
       if (!o.time) continue;
       const start = zonedMs(o.date, o.time, tz);
-      if (start < now - 120000) continue;
-      for (const m of rem) {
+      if (start + after * 60000 < now - 120000) continue;
+      const offsets = rem.map(m => [m, 0]);
+      if (nag) for (let k = 1; k <= nag.times; k++) offsets.push([-nag.every * k, k]);
+      for (const [m, k] of offsets) {
         const due = start - m * 60000;
         if (due < now - 30 * 60000 || due > now + days * 86400000) continue;
-        const id = `${o.id}:${origin}:${o.time}:${m}`;
+        const id = k ? `${o.id}:${origin}:${o.time}:n${k}` : `${o.id}:${origin}:${o.time}:${m}`;
         if (seen.has(id)) continue;
         seen.add(id);
-        out.push({ id, itemId: o.id, origin, date: o.date, time: o.time, title: o.title, icon: o.icon || '', start, due, minutes: m });
+        out.push({ id, itemId: o.id, origin, date: o.date, time: o.time, title: o.title, icon: o.icon || '', start, due, minutes: m, nag: k, nagTotal: nag?.times || 0 });
       }
     }
   }
@@ -147,6 +152,8 @@ export function minutesLabel(m) {
   return `${m} dk önce`;
 }
 // [0, 10, 15, 60] → "Vaktinde · 10, 15 dk · 1 saat önce"
+// Kısa tekrar etiketi: "10 dk × 5"
+export const nagShort = n => (n ? `${n.every % 60 === 0 ? n.every / 60 + ' sa' : n.every + ' dk'} × ${n.times}` : '');
 export function remindersLabel(list) {
   if (!list) return '';
   if (!list.length) return 'Hatırlatma yok';
@@ -222,6 +229,12 @@ function cleanPatch(p) {
   if ('title' in p && typeof p.title === 'string' && p.title.trim()) out.title = p.title.trim().slice(0, 300);
   return out;
 }
+// Tamamlanmazsa tekrar hatırlat: { every: dakika (1–1440), times: 1–20 } ya da null
+export function cleanNag(v) {
+  if (!v || typeof v !== 'object') return null;
+  const every = Math.round(Number(v.every)), times = Math.round(Number(v.times));
+  return every >= 1 && every <= 1440 && times >= 1 && times <= 20 ? { every, times } : null;
+}
 export function cleanItem(raw) {
   if (!raw || typeof raw !== 'object') throw Error('Plan geçersiz.');
   if (typeof raw.id !== 'string' || !/^[-_:a-zA-Z0-9]{1,150}$/.test(raw.id)) throw Error('Plan kimliği geçersiz.');
@@ -246,6 +259,7 @@ export function cleanItem(raw) {
     date, time: raw.time || '', endTime: raw.time && raw.endTime ? raw.endTime : '',
     repeat, weekdays: repeat === 'weekly' ? weekdays : [], until: raw.until && isDate(raw.until) ? raw.until : '',
     reminders: cleanReminders(raw.reminders),
+    nag: cleanNag(raw.nag),
     status: STATUS.includes(raw.status) ? raw.status : raw.status === 'postponed' ? 'cancelled' : 'pending',
     exceptions, note: typeof raw.note === 'string' ? raw.note.slice(0, 4000) : '',
     icon: typeof raw.icon === 'string' && /^[a-z]{2,12}$/.test(raw.icon) ? raw.icon : '',

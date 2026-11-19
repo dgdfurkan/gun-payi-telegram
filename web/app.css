@@ -412,6 +412,8 @@ button.cell:active { background: var(--s-low); }
 .picker .chip, .exp .chip, .group.pad .chip { box-shadow: none; background: var(--s-low); }
 .picker .chip.on, .exp .chip.on, .group.pad .chip.on { background: var(--grad); }
 .pk-sub { font-size: 10px; font-weight: 700; color: var(--label-3); text-transform: uppercase; letter-spacing: .06em; margin: 14px 2px 8px; }
+.pk-sub.nag-h { display: flex; align-items: center; gap: 6px; margin-top: 16px; }
+.pk-sub.nag-h svg { width: 14px; height: 14px; }
 .cal { margin-top: 10px; }
 .cal-h { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 6px 6px; }
 .cal-h b { font-size: 15px; font-weight: 800; }

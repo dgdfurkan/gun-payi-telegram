@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **18 Kasım 2026**. Sürüm **5.5.0**.
+Güncelleme: **19 Kasım 2026**. Sürüm **5.6.0**.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,16 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.6
+
+- **Tamamlanmazsa tekrar hatırlat:** `item.nag = {every, times}` (dakika 1-1440, 1-20 kez). Cümleden okunur: "tekrar hatırlat 10 dakika içinde 5 kere", "yarım saat içinde 2 kere", "5 kere 10 dakikada bir", "1 saat arayla 2 kez", yalnız "tekrar hatırlat" (10 dk × 3). Plan saatinde haber verilir, sonra her aralıkta bir kez daha; tamamlanınca durur. Sohbette her zaman yalnız son hatırlatma durur.
+- **Ertele (Telegram):** hatırlatmada ✓ Tamamlandı ve ⏰ Ertele. Ertele: 10 dk, 20 dk, 30 dk, 1 saat, 2 saat, Yarın, ✏️ Süre yaz ("42 dk", "1G", "1 gün 5 saat", "1 hafta", "21:30", "yarın 9'da"). Ertelenince düğme "⏰ 21:40" olur; ertelenmişken ara tekrarlar susar.
+- **Taslakta:** Hatırlat menüsünde 🔁 10dk×3, 10dk×5, 30dk×2, Tekrarsız; ya da "10 dk içinde 5 kere" yazılır.
+- **Sade hatırlatma mesajı:** yalnız emoji, iş ve planın saati ("🐾 Balıkların suyunu değiştir / 20:00"; başka günse "Yarın 20:00"). "10 dk sonra", "geçti", kaçıncı tekrar olduğu yazılmaz. Eklendi kartında ayarlar tek satır: "🔔 10 dk önce · 🔁 10 dk × 5".
+- **Sesle not:** iki nokta gerekmez. Başta "Not", "Not al", "Not olarak ekle" ya da sonda "… not olarak ekle" → not; metin olduğu gibi kalır (içindeki saat silinmez), ilk harf büyür. "Not defteri al", "Notları oku" plan kalır.
+- **Göreli saat:** "20 dakika sonra", "2 saat sonra", "yarım saat sonra", "bir buçuk saat sonra", "1 saat 15 dakika sonra" (en fazla 48 saat). Önceden hatırlatma söylenmediyse tam o anda haber verilir (`reminders: [0]`).
+- **Uygulamada:** hatırlatma seçicisinde "Tamamlanmazsa tekrar hatırlat" (Kapalı, 5/10/15/30 dk, 1 sa; 2/3/5/10 kez), ekleme önizlemesinde ve plan kartında "10 dk × 5" etiketi. "balık", "akvaryum" evcil hayvan ikonu alır.
 
 ## 5.5
 
@@ -54,7 +64,7 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 
 ## Doğrulananlar
 
-- `npm test`: 50 test (çözümleyici, uygulama, Worker; Telegram ve AI sahte yanıtla).
+- `npm test`: 70 test (çözümleyici, uygulama, Worker; Telegram ve AI sahte yanıtla).
 - `wrangler deploy --dry-run` paketleme ve bağlamalar.
 - `wrangler dev` ile 375×667 tarayıcıda karşılama, ekleme, çip düzenleme, tamamlama, düzenleme, hafta/ay, notlar, özet, ayarlar; açık ve koyu tema.
 - Canlı (18 Kasım): sürüm 5.0.0 `wrangler deploy` ile yayında, `BOT_TOKEN` tanımlı (bot: @hatirlat_gunduz_bot), webhook kuruldu. Kullanıcı telefondan bağlandı ve anlık deneme mesajını aldı.
@@ -71,6 +81,7 @@ Bunlar gerçek cihaz/hesap ister, yapıldı denmemeli:
 5. İmzalı kısayolun iPhone'da içe aktarılması ve widget'tan `/api/quick` çağrısı.
 6. Saat çarkının iOS'ta kaydırma hissi, panelin klavyeyle yer değiştirmesi, tema geçişi.
 7. Telegram taslak düğmelerinin gerçek botta akışı.
+8. Tekrar hatırlatmanın ve Ertele menüsünün gerçek botta zamanında gelmesi.
 
 ## Sıradaki olası işler
 

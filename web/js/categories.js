@@ -19,7 +19,7 @@ export const CATS = {
   mail: { label: 'Mesaj', color: '#007aff', emoji: '✉️', glyph: 'mail', words: ['mail', 'e-posta', 'eposta', 'mesaj', 'dilekçe'] },
   clean: { label: 'Ev işi', color: '#00c7be', emoji: '🧹', glyph: 'sparkle', words: ['temizlik', 'temizle', 'çamaşır', 'bulaşık', 'süpür', 'ütü', '=çöp', 'çöpü', 'toz al'] },
   fun: { label: 'Eğlence', color: '#bf5af2', emoji: '🎬', glyph: 'film', words: ['film', 'dizi', 'sinema', 'tiyatro', 'konser', 'maç'] },
-  pet: { label: 'Evcil', color: '#a2845e', emoji: '🐾', glyph: 'paw', words: ['köpek', 'kedi', 'mama', 'veteriner'] },
+  pet: { label: 'Evcil', color: '#a2845e', emoji: '🐾', glyph: 'paw', words: ['köpek', 'kedi', 'mama', 'veteriner', 'balık', 'akvaryum'] },
   plant: { label: 'Bitki', color: '#30d158', emoji: '🌱', glyph: 'leaf', words: ['çiçek', 'bitki', 'sula', 'fide', 'bahçe'] },
   gift: { label: 'Hediye', color: '#ff2d55', emoji: '🎁', glyph: 'gift', words: ['hediye'] },
 };

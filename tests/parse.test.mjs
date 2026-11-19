@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, cleanTitle, parseDurations, parseClock } from '../web/js/parse.js';
+import { parse, cleanTitle, parseDurations, parseClock, parseNag, nagLabel } from '../web/js/parse.js';
 
 // 18 Kasım 2026 Çarşamba, İstanbul 10:00
 const now = Date.parse('2026-11-18T07:00:00Z');
@@ -94,4 +94,60 @@ test('yazılan saat esnek okunur', () => {
   assert.equal(parseClock('17'), '17:00');
   assert.equal(parseClock('akşam 8', { now, tz: 'Europe/Istanbul' }), '20:00');
   assert.equal(parseClock('xyz'), '');
+});
+
+test('tamamlanmazsa tekrar hatırlat ifadeleri', () => {
+  const r = p("Akşam 8'de balıkların suyu değiştirilecek. Tekrar hatırlat 10 dakika içinde 5 kere");
+  assert.equal(r.title, 'Balıkların suyu değiştirilecek');
+  assert.equal(r.time, '20:00');
+  assert.deepEqual(r.nag, { every: 10, times: 5 });
+  assert.deepEqual(p('yarın 9da spor, yarım saat içinde 2 kere hatırlat').nag, { every: 30, times: 2 });
+  assert.deepEqual(p('her gün 22:00 ilaç 5 kere 10 dakikada bir hatırlat').nag, { every: 10, times: 5 });
+  assert.deepEqual(p('yarın 10da toplantı 1 saat arayla 2 kez hatırlat').nag, { every: 60, times: 2 });
+  assert.deepEqual(p("yarın 7'de kalk tekrar hatırlat").nag, { every: 10, times: 3 });
+  const both = p("Her pazar akşam 8'de balıkların suyunu değiştir, 15 dakika önce hatırlat, tamamlamazsam 10 dakikada bir 5 kere hatırlat");
+  assert.equal(both.title, 'Balıkların suyunu değiştir');
+  assert.deepEqual([both.repeat, both.weekdays, both.time, both.reminders, both.nag], ['weekly', [0], '20:00', [15], { every: 10, times: 5 }]);
+  assert.equal(p("yarın 9'da spor, yapmazsam 3 kere tekrar hatırlat").title, 'Spor');
+  assert.equal(p("yarın 3'te dişçi, yarım saat önce hatırlat").nag, null, 'önceden hatırlatma tekrar sayılmaz');
+  assert.deepEqual(p("yarın 3'te dişçi, yarım saat önce hatırlat").reminders, [30]);
+  assert.deepEqual(parseNag('10 dk içinde 5 kere'), { every: 10, times: 5 });
+  assert.deepEqual(parseNag('her 15 dakikada bir'), { every: 15, times: 3 });
+  assert.deepEqual(parseNag('3 kere'), { every: 10, times: 3 });
+  assert.equal(parseNag('yok'), false);
+  assert.equal(parseNag('30 dk'), null, 'tek süre hatırlatmadır, tekrar değil');
+  assert.equal(nagLabel({ every: 10, times: 5 }), "10 dk'da bir · 5 kez");
+  assert.equal(nagLabel({ every: 60, times: 2 }), '1 saatte bir · 2 kez');
+});
+
+test('erteleme süreleri yazılabilir', () => {
+  assert.deepEqual(parseDurations('1G'), [1440]);
+  assert.deepEqual(parseDurations('1 gün 5 dakika'), [1445]);
+  assert.deepEqual(parseDurations('1 gün 5 saat'), [1740]);
+  assert.deepEqual(parseDurations('42 dakika'), [42]);
+  assert.deepEqual(parseDurations('1 hafta'), [10080]);
+});
+
+test('sesle not: iki nokta söylemeden', () => {
+  const n = t => { const r = p(t); return r.kind === 'note' ? r.title : `(${r.kind}) ${r.title}`; };
+  assert.equal(n('Not balık yemi bitmek üzere'), 'Balık yemi bitmek üzere');
+  assert.equal(n('Not. Balık yemi bitmek üzere.'), 'Balık yemi bitmek üzere.');
+  assert.equal(n("Not, yarın 9'da Ahmet aradı"), "Yarın 9'da Ahmet aradı", 'not metnindeki zaman silinmez');
+  assert.equal(n('Not al balık yemi bitti'), 'Balık yemi bitti');
+  assert.equal(n('Akvaryum filtresi değişecek not olarak ekle'), 'Akvaryum filtresi değişecek');
+  assert.equal(n('Not defteri al'), '(task) Not defteri al');
+  assert.equal(n('Notları oku'), '(task) Notları oku');
+});
+
+test('göreli saat: "20 dakika sonra", "2 saat sonra"', () => {
+  const r = p('20 dakika sonra balıkların suyunu değiştir'); // şimdi 10:00
+  assert.deepEqual([r.title, r.date, r.time, r.reminders], ['Balıkların suyunu değiştir', '2026-11-18', '10:20', [0]]);
+  assert.equal(p('Balıkların suyunu değiştir 2 saat sonra').time, '12:00');
+  assert.equal(p('yarım saat sonra balıkları besle').time, '10:30');
+  assert.equal(p('bir buçuk saat sonra çamaşırları as').time, '11:30');
+  assert.equal(p('1 saat 15 dakika sonra fırını kapat').time, '11:15');
+  const late = p('15 saat sonra uyan');
+  assert.deepEqual([late.date, late.time], ['2026-11-19', '01:00'], 'gece yarısını geçince ertesi gün');
+  assert.deepEqual(p('20 dakika sonra ilaç, 10 dakikada bir 3 kere hatırlat').nag, { every: 10, times: 3 });
+  assert.deepEqual(p('20 dakika sonra toplantı, 5 dakika önce hatırlat').reminders, [5]);
 });

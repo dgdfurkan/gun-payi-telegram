@@ -1,6 +1,6 @@
 // Türkçe doğal dil çözümleyici: "her cuma 12'de babaannemi ara, 10 ve 15 dk önce hatırlat"
 // Kural tabanlıdır, ağ kullanmaz. Anlamadığı zamansal kelime kalırsa `doubt` doldurur.
-import { dayAt, clockAt, dayAdd, weekday, mondayOf, monthDays, pad, TZ_DEFAULT } from './core.js';
+import { dayAt, clockAt, fromMin, dayAdd, weekday, mondayOf, monthDays, pad, TZ_DEFAULT } from './core.js';
 
 const B = '(?<![\\p{L}\\p{N}])';
 const E = '(?![\\p{L}\\p{N}])';
@@ -74,16 +74,22 @@ export function parse(input, opts = {}) {
   const { day: today, minutes: nowMin } = clockAt(now, tz);
   const raw = String(input || '').replace(/\s+/g, ' ').trim().slice(0, 500);
   const t = new Text(raw);
-  const out = { kind: 'task', title: '', date: '', time: '', endTime: '', repeat: 'none', weekdays: [], reminders: null, timeGuess: false, doubt: [] };
-  const found = { date: false, time: false, repeat: false, reminders: false };
-  let period = null, hour = null, minute = 0, endHour = null, endMinute = 0, ownPeriod = null, monthDay = null, dateShift = 0, exact = false, endExact = false;
+  const out = { kind: 'task', title: '', date: '', time: '', endTime: '', repeat: 'none', weekdays: [], reminders: null, nag: null, timeGuess: false, doubt: [] };
+  const found = { date: false, time: false, repeat: false, reminders: false, nag: false };
+  let relative = false, period = null, hour = null, minute = 0, endHour = null, endMinute = 0, ownPeriod = null, monthDay = null, dateShift = 0, exact = false, endExact = false;
 
-  // 1) Not mu?
-  t.each("(?:not\\s*:|not\\s+(?:al|et|olarak)\\s*:?|aklımdaki|aklıma gelen)", 'note', (m, a) => {
-    if (a !== 0) return false;
-    out.kind = 'note';
-  });
-  t.each('not olarak (?:ekle|kaydet|al)', 'note', () => { out.kind = 'note'; });
+  // 1) Not mu? Başta "Not", "Not:", "Not al", "Not olarak ekle"; sonda "… not olarak ekle". Not metni olduğu gibi kalır.
+  const head = t.s.match(NOTE_HEAD), tail = head ? null : t.s.match(NOTE_TAIL);
+  if (head || tail) {
+    const text = head ? raw.slice(head[0].length) : raw.slice(0, tail.index);
+    const body = text.replace(/^[\s:.,;!\-–]+/u, '').replace(/[\s,;:\-–]+$/u, '');
+    return { ...out, kind: 'note', title: body ? body[0].toLocaleUpperCase('tr') + body.slice(1) : '', found };
+  }
+
+  // 1b) Tamamlanmazsa tekrar hatırlat: "10 dakika içinde 5 kere", "yarım saat arayla 2 kez", "tekrar hatırlat"
+  for (const [pattern, pick] of NAG_PATTERNS) t.each(pattern, 'nag', m => { const v = pick(m); if (!v) return false; out.nag = v; found.nag = true; });
+  // "tamamlamazsam", "yapmazsam", "unutursam" tekrar isteğinin parçasıdır, başlığa girmez
+  if (found.nag) t.each('(?:tamamla|tamamlan|yap|yapıl|bitir|hallet)m[ae]zs[ae]\\p{L}*|unutursa\\p{L}*', 'nag', () => {});
 
   // 2) Hatırlatmalar: "10 ve 15 dakika önce", "yarım saat önce", "1 gün önceden"
   const UNIT = '(saniye|sn|dakika|dakka|dk|dak|saat|sa|gün)';
@@ -192,6 +198,21 @@ export function parse(input, opts = {}) {
     if (!(h >= 0 && h <= 24) || !(mi >= 0 && mi <= 59)) return false;
     hour = h === 24 ? 0 : h; minute = mi; ownPeriod = p || null; exact = ex; found.time = true;
   };
+  // Göreli: "20 dakika sonra", "2 saat sonra", "yarım saat sonra", "1 saat 15 dakika sonra", "bir buçuk saat sonra"
+  t.each(`(\\d{1,3}(?:[.,]\\d)?|yarım|çeyrek|${NUMW})(\\s*buçuk)?\\s*(dakika|dakka|dk|saat|sa)(?:\\s+(\\d{1,2}|${NUMW})\\s*(?:dakika|dakka|dk))?\\s+sonra(?:ya|sı|sına)?`, 'time', m => {
+    if (found.time || found.date || found.repeat) return false;
+    let n = m[1] === 'yarım' ? 0.5 : m[1] === 'çeyrek' ? 0.25 : /\d/.test(m[1]) ? parseFloat(m[1].replace(',', '.')) : wordNum(m[1]);
+    if (!Number.isFinite(n)) return false;
+    if (m[2]) n += 0.5;
+    let mins = /^(saat|sa)$/.test(m[3]) ? n * 60 : n;
+    if (m[4]) mins += wordNum(m[4]);
+    mins = Math.round(mins);
+    if (!(mins >= 1 && mins <= 2880)) return false;
+    const at = clockAt(now + mins * 60000, tz);
+    setDate(at.day);
+    setTime(Math.floor(at.minutes / 60), at.minutes % 60, null, true);
+    relative = true;
+  });
   // Aralık: "14:00-15:30", "2'den 4'e kadar", "14 ile 16 arası"
   t.each(`(?:${PERIOD}${PERIOD_SUF}\\s*)?(?:saat\\s*)?(\\d{1,2})(?:[:.](\\d{2}))?\\s*(?:-|–|'?(?:den|dan|ten|tan)|\\s+ile)\\s*(\\d{1,2})(?:[:.](\\d{2}))?\\s*(?:'?(?:e|a|ye|ya)\\s*kadar|arası(?:nda)?|'?(?:e|a|ye|ya)(?=\\s|$))?`, 'time', m => {
     const h1 = +m[2], h2 = +m[4];
@@ -282,13 +303,56 @@ export function parse(input, opts = {}) {
   if (out.kind === 'note' && !out.title) out.title = '';
   out.doubt = doubts(out.title, found);
   out.found = found;
+  if (relative && out.reminders == null) out.reminders = [0]; // "20 dakika sonra": tam o anda haber ver
   if (out.kind !== 'note') out.kind = out.time ? 'event' : 'task';
   return out;
 }
 
 const toMinutes = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+// Sesle "Not balık yemi bitti" (iki nokta söylemeden). "Not defteri al" plandır.
+const NOTE_HEAD = /^(?:not(?:\s+(?:al|et|olarak|ekle|yaz|düş|kaydet)(?:\s+(?:ekle|kaydet|al))?)?|aklımdaki|aklıma\s+gelen)(?![\p{L}\p{N}])(?!\s*(?:defter|kağıd|kağıt|kâğıt|kâğıd))/u;
+const NOTE_TAIL = /[\s,.;:]+not\s+(?:olarak\s+)?(?:ekle|kaydet|al|yaz|düş)[.!]?$/u;
 
-const FILLER = new Set(['ve', 'seç', 'seçsin', 'seçer', 'ekle', 'ekler', 'eklesene', 'kaydet', 'hatırlat', 'hatırlatsın', 'hatırlatma', 'hatırlatır', 'hatırlatıcı', 'olarak', 'bana', 'lütfen', 'de', 'da', 'kur', 'ayarla', 'oluştur', 'saat', 'her', 'için', 'ayrıca', 'misin', 'mısın', 'musun', 'müsün', 'tamam', 'bildir', 'bildirim', 'gönder', 'alarm', 'takvime', 'takvimime', 'plana', 'planıma', 'ajandaya', 'listeye', 'listeme', 'bir', 'şekilde', 'şeklinde', 'beni', 'bunu', 'not', 'al', 've', 'diye', 'yap', 'gerekli', 'olan', 'şeyi', 'şeyini']);
+// --- Tekrar hatırlatma (tamamlanana kadar) ---
+const NAGU = '(dakika|dakka|dk|dak|saat|sa)';
+const NAGSEP = "(?:'?(?:da|de|ta|te)\\s+bir|\\s*içinde|\\s*arayla|\\s*aralıkla|\\s*ara\\s+ile)";
+const NAGC = `(${NUM})\\s*(?:kere|kez|defa|sefer)`;
+const NAGHAT = '(?:(?:tekrar|yine|tekrardan)\\s+)?hatırlat\\p{L}*';
+function nagValue(n, unit, count) {
+  const k = n === 'yarım' ? 0.5 : wordNum(n);
+  const every = Math.round(/^(saat|sa)$/.test(unit) ? k * 60 : (n === 'yarım' ? 30 : k));
+  const times = count == null ? 3 : wordNum(count);
+  if (!(every >= 1 && every <= 1440) || !(times >= 1 && times <= 20)) return null;
+  return { every, times };
+}
+export const NAG_PATTERNS = [
+  // "tekrar hatırlat 10 dakika içinde 5 kere", "her 15 dakikada bir 3 kez"
+  [`(?:${NAGHAT}\\s*[:,]?\\s*)?(?:her\\s+)?(${NUM}|yarım)\\s*${NAGU}${NAGSEP}\\s*,?\\s*${NAGC}(?:\\s+${NAGHAT})?`, m => nagValue(m[1].trim(), m[2], m[3])],
+  // "5 kere 10 dakikada bir hatırlat"
+  [`${NAGC}\\s*(?:${NAGHAT}\\s*)?,?\\s*(?:her\\s+)?(${NUM}|yarım)\\s*${NAGU}${NAGSEP}(?:\\s+${NAGHAT})?`, m => nagValue(m[2].trim(), m[3], m[1])],
+  // "her 10 dakikada bir tekrar hatırlat" (sayı yoksa 3 kez)
+  [`(?:her\\s+)?(${NUM}|yarım)\\s*${NAGU}${NAGSEP}\\s+${NAGHAT}`, m => nagValue(m[1].trim(), m[2], null)],
+  // "5 kere tekrar hatırlat", "tekrar hatırlat" (aralık yoksa 10 dk)
+  [`${NAGC}\\s+(?:tekrar|yine|tekrardan)\\s+hatırlat\\p{L}*|(?:tekrar|yine|tekrardan)\\s+hatırlat\\p{L}*(?:\\s+${NAGC})?`, m => nagValue('10', 'dk', m[1] ?? m[2] ?? null)],
+];
+// Yalnız tekrar ifadesi yazıldığında (Telegram taslağı): {every, times} | null
+export function parseNag(input) {
+  const s = String(input || '').trim().toLocaleLowerCase('tr');
+  if (/^(tekrar\s+)?(yok|kapat|kapalı|istemiyorum|hayır)$/u.test(s)) return false;
+  for (const [pattern, pick] of NAG_PATTERNS) {
+    const m = s.match(new RegExp(B + '(?:' + pattern + ')' + E, 'u'));
+    if (m) { const v = pick(m); if (v) return v; }
+  }
+  // Tek başına: "her 15 dakikada bir" (3 kez), "5 kere" (10 dk arayla)
+  let m = s.match(new RegExp(`^(?:her\\s+)?(${NUM}|yarım)\\s*${NAGU}${NAGSEP}$`, 'u'));
+  if (m) return nagValue(m[1].trim(), m[2], null);
+  m = s.match(new RegExp(`^${NAGC}$`, 'u'));
+  if (m) return nagValue('10', 'dk', m[1]);
+  return null;
+}
+export const nagLabel = n => (n ? `${n.every % 60 === 0 ? n.every / 60 + ' saatte' : n.every + ' dk\'da'} bir · ${n.times} kez` : '');
+
+const FILLER = new Set(['ve', 'tekrar', 'yine', 'seç', 'seçsin', 'seçer', 'ekle', 'ekler', 'eklesene', 'kaydet', 'hatırlat', 'hatırlatsın', 'hatırlatma', 'hatırlatır', 'hatırlatıcı', 'olarak', 'bana', 'lütfen', 'de', 'da', 'kur', 'ayarla', 'oluştur', 'saat', 'her', 'için', 'ayrıca', 'misin', 'mısın', 'musun', 'müsün', 'tamam', 'bildir', 'bildirim', 'gönder', 'alarm', 'takvime', 'takvimime', 'plana', 'planıma', 'ajandaya', 'listeye', 'listeme', 'bir', 'şekilde', 'şeklinde', 'beni', 'bunu', 'not', 'al', 've', 'diye', 'yap', 'gerekli', 'olan', 'şeyi', 'şeyini']);
 const KEEP_EDGE = new Set(['al', 'yap', 'not', 'bir']); // başlık içinde anlamlı olabilir; yalnız tek başına kalırsa silinir
 
 export function cleanTitle(text) {
@@ -331,14 +395,14 @@ export function toItem(p, extra = {}) {
     id: extra.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     title: p.title, kind: p.time ? 'event' : 'task', date: p.date || '', time: p.time || '', endTime: p.endTime || '',
     repeat: p.repeat, weekdays: p.repeat === 'weekly' ? p.weekdays : [], until: '',
-    reminders: p.reminders, status: 'pending', exceptions: {}, note: '', createdAt: now, updatedAt: now, ...extra,
+    reminders: p.reminders, nag: p.nag || null, status: 'pending', exceptions: {}, note: '', createdAt: now, updatedAt: now, ...extra,
   };
 }
 export const parseDay = (now, tz) => dayAt(now, tz);
 
 // Yalnız süre yazıldığında hatırlatma listesi: "30 dk", "1 sa 15 dk" (75), "10 ve 15 dk", "yarım saat",
 // "15 sn", "vaktinde ve 10 dk". Anlaşılmazsa null, "yok" için [].
-const DUR_UNIT = { saniye: 1 / 60, sn: 1 / 60, dakika: 1, dakka: 1, dk: 1, dak: 1, d: 1, saat: 60, sa: 60, s: 60, gün: 1440, g: 1440 };
+const DUR_UNIT = { saniye: 1 / 60, sn: 1 / 60, dakika: 1, dakka: 1, dk: 1, dak: 1, d: 1, saat: 60, sa: 60, s: 60, gün: 1440, g: 1440, hafta: 10080, hf: 10080 };
 export function parseDurations(input) {
   let s = String(input || '').toLocaleLowerCase('tr').replace(/[’'`]/g, ' ').replace(/(önce\p{L}*|kala|hatırlat\p{L}*|kadar)/gu, ' ').trim();
   if (!s) return null;
@@ -347,7 +411,7 @@ export function parseDurations(input) {
   if (/(vaktinde|zamanında|tam saatinde|anında)/u.test(s)) { out.add(0); s = s.replace(/(tam\s+)?(vaktinde|zamanında|saatinde|anında)/gu, ' '); }
   s = s.replace(/(\d),(\d)(?!\d)/g, '$1.$2'); // "1,5 saat" ondalık, "10,15 dk" liste
   const groups = s.split(/\s*(?:,|;|\+|(?<![\p{L}])(?:ve|veya|ile|ya da)(?![\p{L}]))\s*/u).map(g => g.trim()).filter(Boolean);
-  const tok = new RegExp(`(\\d+(?:[.,]\\d+)?|yarım|çeyrek|${NUMW})\\s*(saniye|sn|dakika|dakka|dk|dak|saat|sa|gün|g|s|d)?(?![\\p{L}])`, 'gu');
+  const tok = new RegExp(`(\\d+(?:[.,]\\d+)?|yarım|çeyrek|${NUMW})\\s*(saniye|sn|dakika|dakka|dk|dak|saat|sa|gün|g|hafta|hf|s|d)?(?![\\p{L}])`, 'gu');
   const parsed = groups.map(g => {
     const parts = [...g.matchAll(tok)].map(m => ({ n: m[1] === 'çeyrek' ? 0.25 : /\d/.test(m[1]) ? parseFloat(m[1].replace(',', '.')) : wordNum(m[1]), u: m[2] || '' }));
     const rest = g.replace(tok, '').replace(/[\s.]/g, '');

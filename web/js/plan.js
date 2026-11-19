@@ -1,5 +1,5 @@
 // Planım: Gün / Hafta / Ay görünümleri ve satır işlemleri.
-import { itemsOn, dayAdd, weekday, mondayOf, monthDays, daysBetween, dayLabel, repeatLabel, remindersLabel, statusOf, patchOccurrence, toMin, clockAt, DAY_SHORT, DAY_NAMES, MONTHS, pad } from './core.js';
+import { itemsOn, dayAdd, weekday, mondayOf, monthDays, daysBetween, dayLabel, repeatLabel, remindersLabel, nagShort, statusOf, patchOccurrence, toMin, clockAt, DAY_SHORT, DAY_NAMES, MONTHS, pad } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
 import { esc, haptic, toast, actions, reduced } from './ui.js';
@@ -29,6 +29,7 @@ export function itemRow(o, t, { stripe = false } = {}) {
   if (o.time && !done) {
     const rem = o.reminders ?? s.prefs.reminderDefaults;
     if (rem.length) tags.push(`<span class="tag">${icon('bell')}${esc(remindersLabel(rem))}</span>`);
+    if (o.nag) tags.push(`<span class="tag">${icon('again')}${esc(nagShort(o.nag))}</span>`);
   }
   if (o.repeat !== 'none') tags.push(`<span class="tag">${icon('repeat')}${esc(repeatLabel(o))}</span>`);
   if (o.note) tags.push(`<span class="tag">${icon('notes')}Not</span>`);

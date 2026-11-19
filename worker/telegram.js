@@ -1,6 +1,8 @@
 // Telegram Bot API yardımcıları ve mesaj biçimleri.
 import { dayAt, dayAdd, itemsOn, summary, repeatLabel, remindersLabel, dayLabel, DAY_NAMES, DAY_SHORT, shortDate, weekday } from '../web/js/core.js';
 import { emojiOf } from '../web/js/categories.js';
+import { nagShort } from '../web/js/core.js';
+import { nagLabel } from '../web/js/parse.js';
 
 export const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -32,17 +34,29 @@ export const HELP = [
   '/bugun · /yarin · /hafta',
 ].join('\n');
 
-export function reminderMessage(job, now) {
-  const left = Math.round((job.start - now) / 60000);
-  const when = left <= 0 ? 'şimdi' : left < 60 ? `${left} dk sonra` : left < 1440 ? `${Math.floor(left / 60)} sa${left % 60 ? ' ' + (left % 60) + ' dk' : ''} sonra` : `${Math.round(left / 1440)} gün sonra`;
-  return `${emojiOf(job) === '•' ? '⏰' : emojiOf(job)} <b>${esc(job.title)}</b>\n${job.time} · ${when}`;
+// Sade hatırlatma: ne yapılacak ve saati. Kaçıncı hatırlatma ya da "10 dk sonra" yazmaz.
+export function reminderMessage(job, today) {
+  const icon = emojiOf(job) === '•' ? '⏰' : emojiOf(job);
+  const day = job.date && today && job.date !== today ? dayLabel(job.date, today) + ' ' : '';
+  return `${icon} <b>${esc(job.title)}</b>${job.time ? `\n${day}${job.time}` : ''}`;
+}
+// Hatırlatma altındaki düğmeler: ana sıra ya da Ertele menüsü
+export function reminderButtons(itemId, origin, mode = 'main') {
+  const k = `${itemId}:${origin}`;
+  if (mode === 'snooze') return buttons([
+    [['10 dk', `z:${k}:10`], ['20 dk', `z:${k}:20`], ['30 dk', `z:${k}:30`]],
+    [['1 saat', `z:${k}:60`], ['2 saat', `z:${k}:120`], ['Yarın', `z:${k}:1440`]],
+    [['✏️ Süre yaz', `w:${k}`], ['← Geri', `b:${k}`]],
+  ]);
+  return buttons([[['✓ Tamamlandı', `d:${k}`], ['⏰ Ertele', `e:${k}`]]]);
 }
 
 export function addedMessage(item, today, viaAi) {
   const lines = [`✅ ${emojiOf(item)} <b>${esc(item.title)}</b>`];
   const when = item.repeat !== 'none' ? repeatLabel(item) : item.date ? dayLabel(item.date, today) : 'Yapılacaklar';
   lines.push([when, item.time ? (item.endTime ? `${item.time}–${item.endTime}` : item.time) : ''].filter(Boolean).join(' · '));
-  if (item.time && item.reminders) lines.push('🔔 ' + remindersLabel(item.reminders));
+  const extra = [item.time && item.reminders?.length ? '🔔 ' + remindersLabel(item.reminders) : '', item.time && item.nag ? '🔁 ' + nagShort(item.nag) : ''].filter(Boolean);
+  if (extra.length) lines.push(extra.join(' · '));
   if (viaAi) lines.push('<i>✨ AI ile anlaşıldı, kontrol et</i>');
   return lines.join('\n');
 }
@@ -81,8 +95,9 @@ export function draftView(d, today, mode = 'main', defaults = [10]) {
   if (d.voice) lines.push(`🎙 <i>“${esc(d.voice)}”</i>`, '');
   lines.push(`📝 <b>Taslak</b>`, `${emojiOf(it)} <b>${esc(it.title)}</b>`, `📅 ${esc(when)}`, `🕐 ${it.time ? (it.endTime ? `${it.time}–${it.endTime}` : it.time) : 'Saat yok'}`);
   if (it.time) lines.push(`🔔 ${esc(remindersLabel(rem))}`);
+  if (it.time && it.nag) lines.push(`🔁 Tamamlanmazsa ${esc(nagLabel(it.nag))}`);
   if (d.ai) lines.push('<i>✨ AI ile anlaşıldı, kontrol et</i>');
-  const hint = { main: 'Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.', day: 'Ya da tarihi yaz: “20 Aralık”, “20 Aralık 2027”, “haftaya cuma”.', time: 'Ya da saati yaz: “17:34”.', rem: 'Ya da süreyi yaz: “30 dk”, “1 sa 15 dk”, “10 ve 15 dk”.', txt: '✏️ Yeni başlığı yazıp gönder.' }[mode];
+  const hint = { main: 'Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.', day: 'Ya da tarihi yaz: “20 Aralık”, “20 Aralık 2027”, “haftaya cuma”.', time: 'Ya da saati yaz: “17:34”.', rem: 'Ya da yaz: “30 dk”, “1 sa 15 dk”, “10 ve 15 dk”. Tekrar için: “10 dk içinde 5 kere”.', txt: '✏️ Yeni başlığı yazıp gönder.' }[mode];
   if (hint) lines.push('', `<i>${hint}</i>`);
   const back = ['← Geri', x('back')];
   let rows;
@@ -96,7 +111,9 @@ export function draftView(d, today, mode = 'main', defaults = [10]) {
     rows = [['08:00', '09:00', '12:00', '14:00'].map(t), ['17:00', '19:00', '20:00', '21:00'].map(t), [['−15 dk', x('s', -15)], ['−5 dk', x('s', -5)], ['+5 dk', x('s', 5)], ['+15 dk', x('s', 15)]], [['−1 sa', x('s', -60)], ['+1 sa', x('s', 60)], [it.time ? 'Saatsiz' : '✓ Saatsiz', x('t', 'none')], back]];
   } else if (mode === 'rem') {
     const r = ([v, l]) => [(rem.includes(v) ? '✓ ' : '') + l, x('r', v)];
-    rows = [REM_OPTS.slice(0, 4).map(r), REM_OPTS.slice(4).map(r), [[rem.length ? 'Hatırlatma yok' : '✓ Hatırlatma yok', x('r', 'none')], back]];
+    const g = (every, times, l) => [((it.nag?.every === every && it.nag?.times === times) ? '✓ ' : '') + l, x('g', `${every}x${times}`)];
+    rows = [REM_OPTS.slice(0, 4).map(r), REM_OPTS.slice(4).map(r), [[rem.length ? 'Hatırlatma yok' : '✓ Hatırlatma yok', x('r', 'none')]],
+      [g(10, 3, '🔁 10dk×3'), g(10, 5, '🔁 10dk×5'), g(30, 2, '🔁 30dk×2'), [it.nag ? 'Tekrarsız' : '✓ Tekrarsız', x('g', 'none')]], [back]];
   } else if (mode === 'rep') {
     const cur = it.repeat === 'weekly' ? (it.weekdays.join() === '1,2,3,4,5' ? 'weekdays' : it.weekdays.join() === '6,0' ? 'weekend' : 'weekly') : it.repeat;
     const p = (v, l) => [(cur === v ? '✓ ' : '') + l, x('p', v)];
