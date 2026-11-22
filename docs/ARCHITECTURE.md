@@ -5,7 +5,11 @@
 | Yol | Görev |
 | --- | --- |
 | `web/index.html`, `app.css` | Uygulama kabuğu, iOS hissi veren tasarım sistemi (açık/koyu tema) |
-| `web/js/core.js` | **Ortak:** tarih, tekrar, istisna, hatırlatma işleri, etiketler, doğrulama |
+| `web/js/core.js` | **Ortak:** plan modeli, tekrar, etiketler, doğrulama; aşağıdaki üç modülü yeniden dışa aktarır |
+| `web/js/dates.js` | **Ortak:** tarih, saat dilimi, takvim ayı ilkelleri (bağımlılıksız) |
+| `web/js/bills.js` | **Ortak:** fatura türleri ve dönem hesabı |
+| `web/js/jobs.js` | **Ortak:** hatırlatma zamanlaması (plan, tekrar, erteleme, fatura) tek yerde |
+| `web/js/billsview.js` | Faturalar listesi ve fatura düzenleyici |
 | `web/js/parse.js` | **Ortak:** Türkçe doğal dil çözümleyici (kural tabanlı) |
 | `web/js/store.js` | IndexedDB durumu, sunucu olaylarını uygulama, yedek (eski schema 1 dahil) |
 | `web/js/api.js` | Telegram bağlantısı, senkron, test/duraklat |
@@ -32,14 +36,17 @@ IndexedDB `gun-payi` v1, store `local`, anahtar `state`:
 { schema: 2, revision, onboarded, prefs, items, notes, reviews, sync: { cursor } }
 ```
 
-- **Plan:** `id, title, kind, date ('' = Yapılacaklar), time, endTime, repeat (none|daily|weekly|monthly), weekdays, until, reminders (dakika, kesirli = saniye; null = varsayılan), icon ('' = otomatik), status, exceptions{origin: {status,date,time}}, note`.
+- **Plan:** `id, title, kind, date ('' = Yapılacaklar), time, endTime, repeat (none|daily|weekly|monthly|yearly), interval (her N), monthDay (kısa ayda kırpılan 29-31), weekdays, until, reminders, nag, bill, snooze, icon, status, exceptions{origin: {status,date,time,snooze,doneOn}}, note`.
+- **Hatırlatma değeri:** sayı = dakika (kesirli = saniye); `"M1"`, `"M1+4320"` = takvim ayı + dakika. `null` = saatli planda varsayılan, saatsiz planda yok. Saatsiz planın saati `prefs.allDayTime`.
+- **Erteleme:** `{until, at, for}`; tek seferlik planda `snooze`, tekrarlıda `exceptions[origin].snooze`. `for` o günkü tarih+saattir, plan taşınırsa erteleme geçersizleşir. `until` ≥ plan saati ise plan o ana taşınmış sayılır (saat ve tekrarlar oradan). Daha erkense yalnız `until`'e kadarki hatırlatmalar susar.
+- **Fatura:** `bill {type, from, to, before[], after[], auto}`, `repeat: monthly`, `interval` = ayda bir. Dönem anahtarı başladığı ayın `YYYY-MM-01`'i; ödeme `exceptions[anahtar] = {status:'done', doneOn}`. Hatırlatma: `before` gün önce, aralıkta her gün, bitişten `after` gün sonra.
 - Tekrarlayan planda tek günlük değişiklik `exceptions` içinde tutulur. Bitiş saati başlangıçtan küçükse ertesi güne taşar (16:00–01:00 vardiya).
-- `prefs`: `name, timeZone, reminderDefaults, plannerMode, digest{on,time}, reviewDay, color, mode`.
+- `prefs`: `name, timeZone, reminderDefaults, allDayTime, plannerMode, digest{on,time}, reviewDay, color, mode`.
 - Telegram bağlantı anahtarı `localStorage['gp-link']` içindedir, yedeğe girmez.
 
 ## Senkron protokolü
 
-1. Uygulama `POST /api/sync {cursor, items, prefs}` gönderir.
+1. Uygulama `POST /api/sync {proto: 2, cursor, items, prefs}` gönderir. Aynada ya da kuyrukta 5.7 alanı varken `proto` göndermeyen eski önbellek reddedilir (alanları silerdi).
 2. Sunucuda `cursor`'dan yeni olay varsa (Telegram/Kısayol ekledi, tamamlandı…) yalnız olayları döner; uygulama uygular, cursor'u ilerletir, tekrar gönderir.
 3. Olay kalmayınca sunucu plan aynasını değiştirir, alarmı yeniden kurar.
 
@@ -53,8 +60,9 @@ Senkron yalnız açılışta, değişiklikten 1,5 sn sonra ve uygulama öne geli
 - Hatırlatma mesajı sadedir: emoji, iş, planın saati (başka günse gün etiketi). Not: başta `Not`/`Not al`/`Not olarak ekle` ya da sonda `not olarak ekle`, metin olduğu gibi saklanır. Göreli saat (`N dakika/saat sonra`) o anın üstüne eklenir.
 - Çözümleme: önce `parse.js`; başlıkta anlaşılmayan zaman kelimesi kalırsa Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON şeması) yedeği. Saatsiz metin Yapılacaklar'a, `not:` ile başlayan nota gider.
 - Sesli mesaj: `getFile` → Whisper (`@cf/openai/whisper-large-v3-turbo`, `tr`) → aynı yol.
-- Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı** ve **Ertele** düğmeleri. Ertele menüsü: 10 dk, 20 dk, 30 dk, 1 saat, 2 saat, Yarın, ✏️ Süre yaz (`snoozeAwait`: sıradaki mesaj `parseDurations` / tarih / `parseClock` ile okunur, 15 dk geçerli). Erteleme gerçekleşme başına tektir; yenisi eskisinin yerine geçer.
-- Tekrar hatırlatma (`item.nag = {every, times}`): `jobsFor` plan saatine ve sonrasına `n1..nN` işleri ekler; tamamlanınca üretilmez. Alarm aynı gerçekleşmede geciken işlerden yalnız sonuncusunu gönderir, önceki hatırlatma mesajını siler (`msgs` türü `r`). Ertelenmiş gerçekleşmede ara tekrarlar susar.
+- Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı/Ödedim/Çekildi** ve **Ertele**.
+- Ertele: menü açılır açılmaz sohbet süre bekler (`snoozeAwait`, 15 dk). Menü açık değilken de yalnız süre yazılırsa son hatırlatma, yanıtlanan mesaj varsa o ertelenir. Öncelik: yanıtlanan hatırlatma, en son açılan menü (Ertele / taslak menüsü), açık taslak, son hatırlatma. Süre her zaman basılan ya da yazılan andan sayılır (`parseUntil`).
+- Tekrar hatırlatma (`item.nag = {every, times}`): plan anında (ertelendiyse ertelenen anda) ve sonrasında. Alarm aynı gerçekleşmede gecikenlerden yalnız sonuncusunu gönderir; yenisi ulaşınca önceki mesajı siler (`msgs` türü `r`).
 - Alarm: `jobsFor` en yakın işi bulur, `storage.setAlarm`. Gönderilen iş kimlikleri 3 gün tutulur; başarısız gönderim 3 denemeden sonra bırakılır.
 
 ## API

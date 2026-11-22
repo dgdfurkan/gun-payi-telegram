@@ -1,6 +1,6 @@
-// Ekleme (doğal dil + ses), plan düzenleme ve not sayfaları.
-import { parse, toItem } from './parse.js';
-import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, nagShort, summary, weekday, uid, occurrence, patchOccurrence, shortDate, statusOf, DAY_NAMES } from './core.js';
+// Ekleme (doğal dil + ses), plan düzenleme, erteleme ve not sayfaları.
+import { parse, toItem, parseUntil } from './parse.js';
+import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, billRemindLabel, nagShort, weekday, uid, activeOn, occurrence, patchOccurrence, donePatch, shortDate, statusOf, zonedMs, baseTime, makeSnooze, snoozeOf, whenAt, sortRems, MINUTE, DAY_NAMES } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
 import { $, $$, esc, haptic, toast, sheet, actions, confirmDanger } from './ui.js';
@@ -8,10 +8,13 @@ import { ctx, today, tz } from './ctx.js';
 import { startDictation, stopDictation, abortDictation, listening, voiceSupported } from './voice.js';
 import { link, aiParse, sync } from './api.js';
 import { catOf } from './categories.js';
-import { calendarHTML, shiftMonth, quickDays, wheelHTML, bindWheel, reminderHTML, nagHTML, applyNag, handleCustom, toggleReminder, repeatHTML, applyRepeat, toggleWeekday, tile, iconGridHTML } from './pickers.js';
+import { openBill } from './billsview.js';
+import { calendarHTML, shiftMonth, quickDays, wheelHTML, bindWheel, reminderHTML, withTypedReminder, nagHTML, applyNag, isNagButton, handleCustom, toggleReminder, repeatHTML, applyRepeat, intervalOf, toggleWeekday, snoozeHTML, paintSnooze, tile, iconGridHTML } from './pickers.js';
 
-const EXAMPLES = [["Her cuma 12'de babaannemi ara", 'phone'], ["Yarın 9'da spor, 10 dk önce", 'run'], ['Hafta içi 07:30 ilaç', 'pill'], ['Her gün 21:00 kitap oku', 'book'], ['Ekmek al', 'cart']];
+const EXAMPLES = [["Her cuma 12'de babaannemi ara", 'phone'], ["Yarın 9'da spor, 10 dk önce", 'run'], ['Elektrik faturası her ayın 10’u ile 15’i arası', 'bolt'], ['24 Nisan’da nişan, 1 ay önce hatırlat', 'cake'], ['Hafta içi 07:30 ilaç', 'pill'], ['Her gün 21:00 kitap oku', 'book'], ['Ekmek al', 'cart']];
 const whenLabel = (p, t) => (p.repeat !== 'none' ? repeatLabel(p) : p.date ? dayLabel(p.date, t) : 'Yapılacaklar');
+// Saatsiz planda varsayılan "10 dk önce" geçmez; istenen hatırlatma geçer.
+const remOf = p => p.reminders ?? (p.time ? get().prefs.reminderDefaults : []);
 const longDate = (d, t) => { const l = dayLabel(d, t); return /^(Bugün|Yarın|Dün)$/.test(l) ? `${l}, ${shortDate(d)}` : `${shortDate(d)} ${DAY_NAMES[weekday(d)]}`; };
 
 // ---------------- Ekleme ----------------
@@ -65,7 +68,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       aiTimer = setTimeout(async () => {
         try {
           const { result } = await aiParse(value, tz());
-          if (result?.title && ta.value.trim() === value) { st.parsed = { ...st.parsed, ...result }; st.ai = true; st.aiFor = value; renderPreview(null, true); }
+          if (result?.title && ta.value.trim() === value) { st.parsed = { ...st.parsed, ...result, reminders: st.parsed.reminders ?? result.reminders }; st.ai = true; st.aiFor = value; renderPreview(null, true); }
         } catch { /* kural sonucu kalır */ }
       }, 900);
     }
@@ -74,16 +77,21 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
   function renderPreview(prev, flash) {
     const p = current();
     if (!p) return;
-    const t = today(), defaults = get().prefs.reminderDefaults;
+    const t = today();
     const changed = k => flash || (prev && JSON.stringify(prev[k]) !== JSON.stringify(p[k]));
-    const rem = p.reminders ?? defaults;
-    const key = st.over.icon ?? catOf({ title: p.title, icon: '' });
-    const chips = [
-      `<button type="button" class="chip ${st.picker === 'when' ? 'act' : ''} ${changed('date') || changed('repeat') ? 'flash' : ''}" data-pick="when">${icon(p.repeat !== 'none' ? 'repeat' : p.date ? 'cal' : 'inbox')}${esc(whenLabel(p, t))}</button>`,
-      `<button type="button" class="chip ${p.time ? '' : 'off'} ${st.picker === 'time' ? 'act' : ''} ${p.timeGuess && !st.locks.time ? 'guess' : ''} ${changed('time') ? 'flash' : ''}" data-pick="time">${icon('clock')}${p.time ? (p.endTime ? `${p.time}–${p.endTime}` : p.time) : 'Saat ekle'}</button>`,
-    ];
-    if (p.time) chips.push(`<button type="button" class="chip ${rem.length ? '' : 'off'} ${st.picker === 'remind' ? 'act' : ''} ${changed('reminders') ? 'flash' : ''}" data-pick="remind">${icon('bell')}${esc(rem.length ? remindersLabel(rem) : 'Hatırlatma yok')}</button>`);
-    if (p.time && p.nag) chips.push(`<button type="button" class="chip ${st.picker === 'remind' ? 'act' : ''} ${changed('nag') ? 'flash' : ''}" data-pick="remind">${icon('again')}${esc(nagShort(p.nag))}</button>`);
+    const rem = remOf(p);
+    const key = st.over.icon || catOf({ title: p.title, icon: '', bill: p.bill });
+    const chip = (pick, ic, label, cls = '') => `<button type="button" class="chip ${cls} ${st.picker === pick ? 'act' : ''}" data-pick="${pick}">${icon(ic)}${esc(label)}</button>`;
+    const fl = (...keys) => (keys.some(changed) ? 'flash' : '');
+    let chips;
+    if (p.bill) {
+      chips = [chip('bill', 'bill', whenLabel(p, t), fl('date', 'bill')), chip('time', 'clock', p.time || get().prefs.allDayTime, fl('time')), chip('bill', 'bell', billRemindLabel(p.bill), fl('bill'))];
+    } else {
+      chips = [chip('when', p.repeat !== 'none' ? 'repeat' : p.date ? 'cal' : 'inbox', whenLabel(p, t), fl('date', 'repeat')),
+        chip('time', 'clock', p.time ? (p.endTime ? `${p.time}–${p.endTime}` : p.time) : 'Saat ekle', `${p.time ? '' : 'off'} ${p.timeGuess && !st.locks.time ? 'guess' : ''} ${fl('time')}`)];
+      if (p.date) chips.push(chip('remind', 'bell', rem.length ? remindersLabel(rem, !p.time) : p.time ? 'Hatırlatma yok' : 'Hatırlatma ekle', `${rem.length ? '' : 'off'} ${fl('reminders')}`));
+      if (p.date && p.nag) chips.push(chip('remind', 'again', nagShort(p.nag), fl('nag')));
+    }
     if (st.ai) chips.push(`<span class="chip ai">${icon('sparkle')}AI</span>`);
     pv.innerHTML = `<div class="pv-title"><button type="button" class="pv-ico" data-pick="icon" aria-label="İkon seç">${tile(key)}</button><span>${esc(p.title || '…')}</span></div><div class="chips">${chips.join('')}</div>`;
   }
@@ -98,17 +106,17 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       html = `<div class="picker-row">${quickDays(p.repeat === 'none' ? p.date : '', t)}<button type="button" class="chip ${!p.date ? 'on' : ''}" data-date="">Tarihsiz</button></div>
         ${calendarHTML(p.repeat === 'none' ? p.date : '', st.month, t)}<div class="pk-sub">Tekrar</div>${repeatHTML(p)}`;
     } else if (name === 'time') {
-      html = `${wheelHTML(p.time)}<div class="picker-row center"><button type="button" class="chip" data-time-clear>Saati kaldır</button></div>`;
+      html = `${wheelHTML(p.time || (p.bill ? get().prefs.allDayTime : ''))}<div class="picker-row center"><button type="button" class="chip" data-time-clear>Saati kaldır</button></div>`;
     } else if (name === 'remind') {
-      html = reminderHTML(p.reminders ?? get().prefs.reminderDefaults) + nagHTML(p.nag);
+      html = reminderHTML(remOf(p), { allDay: !p.time, at: get().prefs.allDayTime }) + nagHTML(p.nag);
     } else if (name === 'icon') {
-      html = iconGridHTML(st.over.icon ?? '', catOf({ title: p.title, icon: '' }));
+      html = iconGridHTML(st.over.icon ?? '', catOf({ title: p.title, icon: '', bill: p.bill }));
     }
     picker.innerHTML = html;
     picker.hidden = false;
     picker.classList.remove('in'); void picker.offsetWidth; picker.classList.add('in');
     if (name === 'time') {
-      if (!p.time) setOver('time', '09:00');
+      if (!p.time) setOver('time', p.bill ? get().prefs.allDayTime : '09:00');
       bindWheel(picker, v => { setOver('time', v); renderPreview(null); });
     }
     renderPreview(null);
@@ -132,29 +140,37 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
     if (b.dataset.x === 'close') return sh.close();
     if (b.dataset.k) { haptic(); return setKind(b.dataset.k); }
     if (b.dataset.ex) { ta.value = b.dataset.ex; grow(); haptic(); return reparse(true); }
+    if (b.dataset.pick === 'bill') {
+      haptic(); ta.blur(); stopDictation();
+      return openBill({ draft: { ...current(), icon: st.over.icon || '' }, onSaved: () => sh.close() });
+    }
     if (b.dataset.pick) { haptic(); ta.blur(); return openPicker(b.dataset.pick); }
     const p = current();
     if (!p) return;
     if ('date' in b.dataset || b.dataset.calDay) {
       const d = b.dataset.calDay || b.dataset.date;
-      setOver('date', d); setOver('repeat', 'none'); setOver('weekdays', []);
+      setOver('date', d); setOver('repeat', 'none'); setOver('interval', 1); setOver('monthDay', 0); setOver('weekdays', []);
       if (!d) { setOver('time', ''); setOver('endTime', ''); }
       haptic(); refreshPicker(); return;
     }
     if (b.dataset.calNav) { st.month = shiftMonth(st.month, +b.dataset.calNav); haptic(); return refreshPicker(); }
-    if (b.dataset.rep) { const n = applyRepeat(p, b.dataset.rep, today()); for (const k of ['date', 'repeat', 'weekdays']) setOver(k, n[k]); haptic(); return refreshPicker(); }
+    if (b.dataset.rep) { const n = applyRepeat(p, b.dataset.rep, today()); for (const k of ['date', 'repeat', 'interval', 'weekdays']) setOver(k, n[k]); haptic(); return refreshPicker(); }
     if (b.dataset.wday) { setOver('weekdays', toggleWeekday(p, +b.dataset.wday).weekdays); haptic(); return refreshPicker(); }
     if ('timeClear' in b.dataset) { setOver('time', ''); setOver('endTime', ''); haptic(); closePicker(); return renderPreview(null); }
-    if (b.dataset.rem) { setOver('reminders', toggleReminder(p.reminders ?? get().prefs.reminderDefaults, b.dataset.rem)); haptic(); return refreshPicker(); }
-    if ('nagEvery' in b.dataset || 'nagTimes' in b.dataset) { setOver('nag', applyNag(p.nag, b)); haptic(); return refreshPicker(); }
+    if (b.dataset.int) { setOver('interval', intervalOf($('[data-intv]', picker).value, b.dataset.int)); haptic(); return refreshPicker(); }
+    if (b.dataset.rem) { setOver('reminders', toggleReminder(remOf(p), b.dataset.rem)); haptic(); return refreshPicker(); }
+    if (isNagButton(b)) { setOver('nag', applyNag(p.nag, b)); haptic(); return refreshPicker(); }
     if (b.dataset.rc || b.dataset.unit) {
       const v = handleCustom(b);
-      if (v !== null) { const cur = p.reminders ?? get().prefs.reminderDefaults; if (!cur.includes(v)) setOver('reminders', [...cur, v]); haptic('success'); refreshPicker(); }
+      if (v !== null) { const cur = remOf(p); if (!cur.includes(v)) setOver('reminders', sortRems([...cur, v])); haptic('success'); refreshPicker(); }
       return;
     }
     if ('ico' in b.dataset) { setOver('icon', b.dataset.ico); haptic(); closePicker(); return renderPreview(null); }
   });
 
+  sh.body.addEventListener('change', e => {
+    if (e.target.dataset.intv !== undefined) { setOver('interval', intervalOf(e.target.value)); refreshPicker(); }
+  });
   let t0;
   ta.addEventListener('input', () => { grow(); clearTimeout(t0); t0 = setTimeout(() => reparse(), 90); });
   ta.addEventListener('focus', () => { if (st.picker) closePicker(), renderPreview(null); });
@@ -197,6 +213,9 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       return;
     }
     if (!st.parsed) reparse();
+    // Özel süre yazılıp "Ekle"ye basılmadıysa yine de sayılır.
+    const typed = current()?.bill ? null : withTypedReminder(picker, remOf(current() || {}));
+    if (typed) setOver('reminders', typed);
     const p = current();
     if (!p?.title) { toast('Ne ekleyeceğimi anlamadım, biraz daha yaz.'); return; }
     let item;
@@ -221,17 +240,26 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
 export function openItem(id, origin) {
   const base = get().items.find(i => i.id === id);
   if (!base) return;
+  if (base.bill) return openBill({ id, origin });
   let d = structuredClone(base);
   const occ = origin && d.repeat !== 'none' ? occurrence(d, origin) : null;
-  const t = today();
-  let open = '', month = (d.date || t).slice(0, 7);
-  const remSel = () => d.reminders ?? get().prefs.reminderDefaults;
+  const t = today(), prefs = get().prefs;
+  const remSel = () => remOf(d);
   const isDone = statusOf(base, origin || base.date) === 'done';
+  const now0 = Date.now(), cur0 = occ || occurrence(base, base.date);
+  const canSnooze = statusOf(base, origin || base.date) === 'pending' && (base.repeat === 'none' ? Boolean(base.date) : Boolean(occ));
+  const z = canSnooze ? snoozeOf(cur0) : null;
+  const waiting = z && z.until > now0 ? z : null;
+  // Saati gelmiş planda erteleme doğrudan açık gelir; ayrıca bir düğmeye basmak gerekmez.
+  const due = canSnooze && (waiting || zonedMs(cur0.date, baseTime(cur0, prefs), tz()) <= now0 + 60 * MINUTE);
+  let open = due ? 'snooze' : '', month = (d.date || t).slice(0, 7), typed = '';
   const row = (key, ic, label, value, cls = '') => `<button type="button" class="cell ${open === key ? 'opened' : ''} ${cls}" data-x="${key}"><span class="cell-ic soft">${icon(ic)}</span><span class="cell-label">${label}</span><span class="cell-value">${value}</span>${icon('chevD', 'chev rot')}</button>`;
   const body = () => `<div class="form">
     <div class="ed-head"><button type="button" class="pv-ico big" data-x="icon" aria-label="İkon seç">${tile(catOf(d), 'lg')}</button>
       <input class="title-input" value="${esc(d.title)}" data-f="title" aria-label="Başlık" enterkeyhint="done"></div>
     ${open === 'icon' ? `<div class="group pad in">${iconGridHTML(d.icon, catOf({ title: d.title, icon: '' }))}</div>` : ''}
+    ${canSnooze ? `<div class="group">${row('snooze', 'again', 'Ertele', waiting ? esc(whenAt(waiting.until, tz(), t)) : '')}
+      ${open === 'snooze' ? `<div class="exp in">${snoozeHTML(waiting, typed)}</div>` : ''}</div>` : ''}
     <div class="group">
       ${row('date', 'cal', d.repeat === 'none' ? 'Tarih' : 'Başlangıç', d.date ? esc(longDate(d.date, t)) : 'Yapılacaklar')}
       ${open === 'date' ? `<div class="exp in"><div class="picker-row">${quickDays(d.date, t)}<button type="button" class="chip ${d.date ? '' : 'on'}" data-date="">Tarihsiz</button></div>${calendarHTML(d.date, month, t)}</div>` : ''}
@@ -242,7 +270,7 @@ export function openItem(id, origin) {
     </div>
     ${d.date ? `<div class="group" style="margin-top:14px">${row('rep', 'repeat', 'Tekrar', d.repeat === 'none' ? 'Yok' : esc(repeatLabel(d)))}
       ${open === 'rep' ? `<div class="exp in">${repeatHTML(d)}</div>` : ''}</div>` : ''}
-    ${d.time ? `<div class="section-h">Telegram hatırlatması</div><div class="group pad">${reminderHTML(remSel())}${nagHTML(d.nag)}</div>` : ''}
+    ${d.date ? `<div class="section-h">Telegram hatırlatması</div><div class="group pad">${reminderHTML(remSel(), { allDay: !d.time, at: prefs.allDayTime })}${nagHTML(d.nag)}</div>` : ''}
     <div class="section-h">Not</div><div class="group"><textarea class="note-input" data-f="note" placeholder="Ayrıntı ekle" rows="3">${esc(d.note || '')}</textarea></div>
     <div class="group"><button type="button" class="cell" data-x="done"><span class="cell-ic green">${icon(isDone ? 'undo' : 'check')}</span><span class="cell-label">${isDone ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı'}${occ ? `<small>Sadece ${esc(dayLabel(occ.date, t))}</small>` : ''}</span></button></div>
     ${occ ? `<div class="section-h">Sadece ${esc(dayLabel(occ.date, t))}</div><div class="group">
@@ -257,6 +285,7 @@ export function openItem(id, origin) {
     const y = sh.body.scrollTop;
     sh.body.innerHTML = body();
     sh.body.scrollTop = y;
+    if (open === 'snooze' && typed) previewSnooze();
     if (open === 'time' || open === 'end') bindWheel($('.exp', sh.body), v => {
       if (open === 'time') d.time = v; else d.endTime = v;
       const val = $(`[data-x="${open}"] .cell-value`, sh.body);
@@ -264,32 +293,70 @@ export function openItem(id, origin) {
     });
   };
   const toggle = key => { open = open === key ? '' : key; if (key === 'time' && !d.time) d.time = '09:00'; if (key === 'end' && !d.endTime) d.endTime = d.time; haptic(); rerender(); };
+  function previewSnooze() {
+    const input = $('[data-szv]', sh.body);
+    if (input) paintSnooze(input, parseUntil(input.value, { now: Date.now(), tz: tz(), bare: true }), tz(), t);
+  }
+  // Her zaman dokunulan / yazılan andan sayılır.
+  async function snoozeTo(until) {
+    read();
+    const now = Date.now();
+    let item;
+    try { item = merged(); } catch (err) { toast(err.message); return; }
+    if (!item) return;
+    const key = item.repeat === 'none' ? item.date : origin || item.date;
+    if (!item.date || !activeOn(item, key)) { toast('Bu gün artık tekrarın içinde değil.'); return; }
+    const o = occurrence(item, key), prev = o.snooze || null;
+    const write = snooze => commit(s => { const i = s.items.findIndex(x => x.id === id); if (i >= 0) s.items[i] = patchOccurrence(s.items[i], key, { snooze }); });
+    await commit(s => { const i = s.items.findIndex(x => x.id === id); if (i >= 0) s.items[i] = patchOccurrence(item, key, { snooze: until ? makeSnooze(o, until, now) : null }); });
+    haptic('success'); sh.close(); sync(true);
+    toast(until ? `Ertelendi · ${whenAt(until, tz(), today())}${link() ? '' : ' · Telegram bağlı değil'}` : 'Erteleme kaldırıldı', { label: 'Geri al', run: () => write(prev).then(() => sync(true)) });
+  }
+  sh.body.addEventListener('input', e => {
+    if (e.target.dataset.szv !== undefined) { typed = e.target.value; previewSnooze(); }
+  });
+  sh.body.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.target.dataset.szv === undefined) return;
+    e.preventDefault();
+    $('[data-sz="typed"]:not([disabled])', sh.body)?.click();
+  });
+  sh.body.addEventListener('change', e => {
+    if (e.target.dataset.intv !== undefined) { d.interval = intervalOf(e.target.value); rerender(); }
+  });
   sh.body.addEventListener('click', async e => {
     const b = e.target.closest('button');
     if (!b) return;
     const x = b.dataset.x;
-    if (['icon', 'date', 'time', 'end', 'rep'].includes(x)) return toggle(x);
+    if (['icon', 'date', 'time', 'end', 'rep', 'snooze'].includes(x)) return toggle(x);
     read();
+    if (b.dataset.sz) {
+      const v = b.dataset.sz, now = Date.now();
+      const until = v === 'clear' ? null : v === 'typed' ? parseUntil(typed, { now, tz: tz(), bare: true }) : now + Number(v) * MINUTE;
+      if (v !== 'clear' && !until) return previewSnooze();
+      return snoozeTo(until);
+    }
     if ('ico' in b.dataset) { d.icon = b.dataset.ico; open = ''; haptic(); return rerender(); }
     if ('date' in b.dataset || b.dataset.calDay) {
       d.date = b.dataset.calDay || b.dataset.date;
-      if (!d.date) { d.time = ''; d.endTime = ''; d.repeat = 'none'; d.weekdays = []; open = ''; }
+      d.monthDay = 0;
+      if (!d.date) { d.time = ''; d.endTime = ''; d.repeat = 'none'; d.interval = 1; d.weekdays = []; open = ''; }
       else if (d.repeat === 'weekly' && d.weekdays.length === 1) d.weekdays = [weekday(d.date)];
       haptic(); return rerender();
     }
     if (b.dataset.calNav) { month = shiftMonth(month, +b.dataset.calNav); haptic(); return rerender(); }
     if (b.dataset.rep) { d = applyRepeat(d, b.dataset.rep, t); haptic(); return rerender(); }
     if (b.dataset.wday) { d = toggleWeekday(d, +b.dataset.wday); haptic(); return rerender(); }
+    if (b.dataset.int) { d.interval = intervalOf($('[data-intv]', sh.body).value, b.dataset.int); haptic(); return rerender(); }
     if (b.dataset.rem) { d.reminders = toggleReminder(remSel(), b.dataset.rem); haptic(); return rerender(); }
-    if ('nagEvery' in b.dataset || 'nagTimes' in b.dataset) { d.nag = applyNag(d.nag, b); haptic(); return rerender(); }
-    if (b.dataset.rc || b.dataset.unit) { const v = handleCustom(b); if (v !== null && !remSel().includes(v)) { d.reminders = [...remSel(), v]; haptic('success'); rerender(); } return; }
+    if (isNagButton(b)) { d.nag = applyNag(d.nag, b); haptic(); return rerender(); }
+    if (b.dataset.rc || b.dataset.unit) { const v = handleCustom(b); if (v !== null && !remSel().includes(v)) { d.reminders = sortRems([...remSel(), v]); haptic('success'); rerender(); } return; }
     if (x === 'notime') { d.time = ''; d.endTime = ''; open = ''; return rerender(); }
     if (x === 'noend') { d.endTime = ''; open = ''; return rerender(); }
     if (x === 'done') {
       const next = isDone ? 'pending' : 'done';
       await commit(s => {
         const i = s.items.findIndex(z => z.id === id);
-        s.items[i] = base.date ? patchOccurrence(s.items[i], origin || base.date, { status: next }) : { ...s.items[i], status: next, updatedAt: new Date().toISOString() };
+        s.items[i] = base.date ? patchOccurrence(s.items[i], origin || base.date, donePatch(base, next, t)) : { ...s.items[i], status: next, updatedAt: new Date().toISOString() };
       });
       haptic('success'); sh.close(); toast(next === 'done' ? 'Tamamlandı' : 'Geri alındı'); sync(); return;
     }
@@ -313,13 +380,22 @@ export function openItem(id, origin) {
       sync();
     }
   });
+  // Bu sayfa açıkken Telegram'dan tamamlanmış ya da ertelenmiş olabilir: o alanlar güncel kayıttan gelir.
+  function merged() {
+    const cur = get().items.find(i => i.id === id);
+    if (!cur) return null;
+    const rem = withTypedReminder(sh.body, remSel());
+    return cleanItem({
+      ...d, ...(rem ? { reminders: rem } : {}), endTime: d.time ? d.endTime : '', status: d.repeat === 'none' ? cur.status : 'pending', exceptions: cur.exceptions,
+      snooze: cur.repeat === 'none' ? cur.snooze : null, updatedAt: new Date().toISOString(),
+    });
+  }
   async function save() {
     read();
     if (!d.title.trim()) { toast('Başlık boş olamaz.'); return; }
-    if (d.endTime && !d.time) d.endTime = '';
     let item;
-    try { item = cleanItem({ ...d, updatedAt: new Date().toISOString() }); } catch (e) { toast(e.message); return; }
-    await commit(s => { const i = s.items.findIndex(z => z.id === id); if (i >= 0) s.items[i] = item; });
+    try { item = merged(); } catch (e) { toast(e.message); return; }
+    if (item) await commit(s => { const i = s.items.findIndex(z => z.id === id); if (i >= 0) s.items[i] = item; });
     haptic('success'); sh.close(); sync();
   }
 }

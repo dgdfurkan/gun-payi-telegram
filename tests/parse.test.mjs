@@ -60,7 +60,7 @@ test('not ön eki not türü verir', () => {
 });
 
 test('anlaşılmayan zaman ifadesi şüphe bırakır', () => {
-  assert.ok(p('her iki haftada bir saç kestir').doubt.length);
+  assert.ok(p('gelecek ayın ilk cumasında saç kestir').doubt.length);
   assert.ok(p('her 2 saatte bir su iç').doubt.length);
   assert.equal(p('Ekmek al').doubt.length, 0);
 });
@@ -167,4 +167,44 @@ test('gelecek zaman ve "-meliyim" başlıkta emre döner', () => {
   assert.equal(p("Yarın 9'da okula gideceğim").title, 'Okula git');
   assert.equal(p('akşam 8de balıkların suyu değiştirilecek').title, 'Balıkların suyu değiştirilecek');
   assert.deepEqual(p("Yarın 3'te dişçi, 3 kere hatırlat").nag, { every: 10, times: 3 });
+});
+
+test('sınırsız hatırlatma: ay, hafta, yıl, 28 gün', () => {
+  const r = p("24 Nisan'da arkadaşımın nişanı var bana bunu bir ay önce hatırlat bir de bir hafta önce hatırlat");
+  assert.deepEqual([r.title, r.date, r.reminders], ['Arkadaşımın nişanı', '2027-04-24', ['M1', 10080]]);
+  assert.deepEqual(p('15 Haziran tatil 1 yıl önce hatırlat').reminders, ['M12']);
+  assert.deepEqual(p('15 Haziran tatil 28 gün önce hatırlat').reminders, [40320]);
+  assert.deepEqual(parseDurations('1 ay ve 1 hafta'), ['M1', 10080]);
+  assert.deepEqual(parseDurations('1 ay 3 gün'), ['M1+4320']);
+});
+
+test('fatura cümleleri', () => {
+  const b = t => { const r = p(t); return r.bill ? [r.bill.type, r.bill.from, r.bill.to, r.interval, r.time] : null; };
+  assert.deepEqual(b("Elektrik faturası her ayın 10'u ile 15'i arası"), ['elektrik', 10, 15, 1, '']);
+  assert.deepEqual(b("Elektrik faturası her ayın 10'u ile 15'i arası saat 11'de hatırlat"), ['elektrik', 10, 15, 1, '11:00']);
+  assert.deepEqual(b("Su faturası ayın 10'undan 15'ine kadar"), ['su', 10, 15, 1, '']);
+  assert.deepEqual(b("Su faturası 2 ayda bir 10'u ile 20'si arası"), ['su', 10, 20, 2, '']);
+  assert.deepEqual(b("Telefon faturası her ayın 25'i ile 5'i arası"), ['telefon', 25, 5, 1, '']);
+  assert.deepEqual(b('Isınma bedeli her ayın onu ile on beşi arası'), ['isinma', 10, 15, 1, '']);
+  assert.deepEqual(b('Aidat her ayın sonunda'), ['aidat', 31, 31, 1, '']);
+  assert.deepEqual(p("Elektrik faturası 10'u ile 15'i arası, ödemezsem 5 gün sonra tekrar hatırlat").bill.after, [5]);
+  for (const t of ['yarın elektrik faturasını öde', "araba kiralama ayın 5'inde", "ayın 5'inde kiraz topla", "bu ayın 25'inde kredi kartı ekstresi", 'Cumartesi 14-16 arası ders', 'akşam 8 ile 9 arası fatura öde']) assert.equal(b(t), null, t);
+});
+
+test('aralıklı ve yıllık tekrar', () => {
+  const r = t => [p(t).repeat, p(t).interval];
+  assert.deepEqual(r('iki haftada bir salı temizlik'), ['weekly', 2]);
+  assert.deepEqual(r('3 günde bir çiçekleri sula'), ['daily', 3]);
+  assert.deepEqual(r('6 ayda bir dişçi'), ['monthly', 6]);
+  assert.deepEqual(r('her yıl 24 Nisan doğum günü'), ['yearly', 1]);
+});
+
+test('"20\'yi 10 geçe", "9\'a 10 kala"', () => {
+  const r = t => [p(t).title, p(t).time, p(t).reminders];
+  assert.deepEqual(r("20'yi 10 geçe balıkları besle"), ['Balıkları besle', '20:10', null]);
+  assert.deepEqual(r("akşam 8'i çeyrek geçe ilaç"), ['İlaç', '20:15', null]);
+  assert.deepEqual(r("9'a 10 kala toplantı"), ['Toplantı', '08:50', null]);
+  assert.deepEqual(r("akşam sekize çeyrek kala film izle"), ['Film izle', '19:45', null]);
+  assert.deepEqual(p('yarın 14:00 toplantı 10 dakika kala hatırlat').reminders, [10]);
+  assert.deepEqual([p("Isınma bedeli ayın 10'uyla 15'i arası").bill.to, p("Elektriği her ayın 10'u ile 15'i arası öde").bill.type], [15, 'elektrik']);
 });

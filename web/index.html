@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#faf8ff">
-<script>(function(){var r=document.documentElement,c='yesil',m='light';try{var v=localStorage.getItem('gp-theme');if(v&&v.charAt(0)==='{'){v=JSON.parse(v);c=v.color||c;m=v.mode||m;}else if(v){var L={light:['indigo','light'],dark:['indigo','dark'],system:['indigo','system'],mor:['mor','light'],yesil:['yesil','light'],mavi:['mavi','light'],gunbatimi:['gunbatimi','light']}[v];if(L){c=L[0];m=L[1];}}}catch(e){}if(m==='system')m=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';r.dataset.color=c;r.dataset.theme=m;})();</script>
+<script>(function(){var r=document.documentElement,c='yesil',m='light';try{var v=localStorage.getItem('gp-theme');if(v&&v.charAt(0)==='{'){v=JSON.parse(v);c=v.color||c;m=v.mode||m;}else if(v){var L={light:['indigo','light'],dark:['indigo','dark'],system:['indigo','system'],mor:['mor','light'],yesil:['yesil','light'],mavi:['mavi','light'],gunbatimi:['gunbatimi','light']}[v];if(L){c=L[0];m=L[1];}}}catch(e){}if(m==='system')m=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';r.dataset.color=c;r.dataset.theme=m;var t=document.querySelector('meta[name=theme-color]');if(t&&m==='dark')t.content='#0d0f14';})();</script>
+<style>/* İlk kare: stil dosyası gelene kadar da uygulamanın zemini. Ayrı açılış ekranı yok; iOS'unki tek ekrandır. */:where(html){background:#faf8ff;color-scheme:light}:where(html[data-theme=dark]){background:#0d0f14;color-scheme:dark}</style>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,12 +15,17 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="apple-touch-startup-image" href="/icons/splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)">
+<link rel="apple-touch-startup-image" href="/icons/splash-750x1334.png" media="screen and (device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/icons/splash-640x1136.png" media="screen and (device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="/app.css">
 <link rel="modulepreload" href="/js/core.js">
+<link rel="modulepreload" href="/js/dates.js">
+<link rel="modulepreload" href="/js/bills.js">
+<link rel="modulepreload" href="/js/jobs.js">
+<link rel="modulepreload" href="/js/billsview.js">
 <link rel="modulepreload" href="/js/store.js">
 <link rel="modulepreload" href="/js/parse.js">
 <link rel="modulepreload" href="/js/plan.js">
@@ -32,7 +38,6 @@
 <title>Gün Payı</title>
 </head>
 <body>
-<div id="splash" aria-hidden="true"><svg viewBox="0 0 120 120"><defs><linearGradient id="spg" gradientUnits="userSpaceOnUse" x1="20" y1="20" x2="100" y2="100"><stop offset="0" style="stop-color:var(--p)"/><stop offset="1" style="stop-color:var(--pc)"/></linearGradient></defs><circle class="sp-glow" cx="60" cy="70" r="30"/><g fill="none" stroke="url(#spg)" stroke-width="7" stroke-linecap="round"><path class="sp-line" d="M20 90h80"/><path class="sp-sun" d="M31 74a29 29 0 0 1 58 0"/><path class="sp-ray r1" d="M60 22v11"/><path class="sp-ray r2" d="M26 37l8 8"/><path class="sp-ray r3" d="M94 37l-8 8"/></g></svg><b>Gün Payı</b></div>
 <div id="app"><div class="boot"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="/js/app.js"></script>

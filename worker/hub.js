@@ -1,15 +1,24 @@
 // Durable Object. 'meta' örneği bağlantı kodlarını ve bot ayarını, 'chat:<id>' örnekleri
 // her kullanıcının plan aynasını, olay kuyruğunu ve hatırlatma alarmını tutar.
 import { DurableObject } from 'cloudflare:workers';
-import { jobsFor, cleanItem, cleanPrefs, dayAt, dayAdd, zonedMs, patchOccurrence, occurrence, statusOf, uid, weekday, toMin, fromMin } from '../web/js/core.js';
-import { parse, toItem, parseDurations, parseClock, parseNag } from '../web/js/parse.js';
-import { tg, send, buttons, esc, HELP, reminderMessage, reminderButtons, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
+import { jobsFor, cleanItem, cleanPrefs, dayAt, dayAdd, hmAt, whenAt, zonedMs, patchOccurrence, occurrence, statusOf, activeOn, donePatch, makeSnooze, snoozeOf, movedTo, readRem, monthRem, MINUTE, MAX_MINUTES, uid, weekday, toMin, fromMin } from '../web/js/core.js';
+import { parse, toItem, parseDurations, parseClock, parseNag, parseSpan, parseUntil } from '../web/js/parse.js';
+import { tg, send, buttons, esc, HELP, reminderMessage, snoozedMessage, snoozeMenuMessage, reminderButtons, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
 import { transcribe, aiParse } from './ai.js';
 
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 export const sha = async s => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 const randomCode = n => [...crypto.getRandomValues(new Uint8Array(n))].map(x => ABC[x % ABC.length]).join('');
+// Eski önbellekten açılan uygulama (senkron sürümü 1) bu alanları tanımaz ve aynadan silerdi.
+const SYNC_PROTO = 2;
+const isNewKind = i => Boolean(i.bill || i.snooze || i.monthDay || i.interval > 1 || i.repeat === 'yearly'
+  || i.reminders?.some(v => monthRem(v) || v > 40320) || i.reminders?.length > 6
+  || (i.nag && (i.nag.every > 1440 || i.nag.times > 20))
+  || Object.values(i.exceptions || {}).some(ex => ex.snooze || ex.doneOn));
+// Taslak fatura: "1 gün önce", "1 hafta önce" → başlamadan kaç gün önce
+const remDays = list => [...new Set(list.map(v => (monthRem(v) ? monthRem(v).months * 30 : Math.floor(v / 1440))).filter(n => n >= 1))].sort((a, b) => a - b);
+const AWAIT_MS = 15 * MINUTE, LIVE_MS = 48 * 60 * MINUTE;
 export const webhookSecret = async env => (await sha('gp-hook:' + env.BOT_TOKEN)).slice(0, 48);
 
 const KEYS = ['auth', 'profile', 'cal', 'events', 'seq', 'sent', 'snooze', 'paused', 'updates', 'lastList', 'digestDay', 'stat', 'tries', 'drafts', 'msgs', 'snoozeAwait'];
@@ -85,7 +94,18 @@ export class ReminderHub extends DurableObject {
     const s = EMPTY();
     for (const k of KEYS) if (got.get(k) !== undefined) s[k] = got.get(k);
     this.s = s;
+    if (s.snooze.some(z => z.itemId)) await this.migrateSnoozes();
     return s;
+  }
+  // 5.6'nın bekleyen ertelemeleri planın kendisine taşınır.
+  async migrateSnoozes() {
+    const s = this.s, now = Date.now();
+    for (const z of s.snooze.filter(x => x.itemId)) {
+      const c = this.pick(z.itemId, z.origin);
+      if (c && statusOf(c.item, c.origin) === 'pending') this.patchPlan(c, { snooze: makeSnooze(c.o, z.due, now) });
+    }
+    s.snooze = s.snooze.filter(x => !x.itemId);
+    await this.save('cal', 'events', 'seq', 'snooze');
   }
   async save(...keys) {
     const s = this.s;
@@ -131,18 +151,26 @@ export class ReminderHub extends DurableObject {
     const s = this.s;
     const cursor = Math.min(Number(body.cursor) || 0, s.seq);
     const pending = s.events.filter(e => e.seq > cursor);
+    if (!(body.proto >= SYNC_PROTO)) {
+      const newer = s.cal.items.some(isNewKind) || pending.some(e => (e.type === 'add' && isNewKind(e.item)) || (e.type === 'patch' && ('snooze' in e.patch || 'doneOn' in e.patch)));
+      if (newer) throw Error('Gün Payı güncellendi. Uygulamayı kapatıp yeniden aç.');
+    }
     if (pending.length) return { events: pending, cursor: s.seq };
-    if (!Array.isArray(body.items) || body.items.length > 3000) throw Error('Plan listesi geçersiz.');
+    if (!Array.isArray(body.items) || body.items.length > 20000) throw Error('Plan listesi geçersiz.');
     const items = [];
     for (const raw of body.items) { try { items.push(cleanItem(raw)); } catch { /* geçersiz kayıt aynaya alınmaz */ } }
     const cleanup = this.finishedPlans(s.cal.items, items);
+    const restyle = this.snoozeChanges(s.cal.items, items);
     s.cal = { items, prefs: cleanPrefs(body.prefs || s.cal.prefs) };
     s.events = [];
     s.stat.sync = Date.now();
     await this.save('cal', 'events', 'stat');
     await this.schedule();
-    if (cleanup.length) {
-      const job = (async () => { for (const [id, origin] of cleanup) await this.purge(id, origin); })();
+    if (cleanup.length || restyle.length) {
+      const job = (async () => {
+        for (const [id, origin] of cleanup) await this.purge(id, origin);
+        for (const [id, origin] of restyle) await this.refreshReminder(id, origin);
+      })();
       if (this.ctx?.waitUntil) this.ctx.waitUntil(job); else await job;
     }
     return { ok: true, cursor: s.seq, ...this.statusBody() };
@@ -165,42 +193,144 @@ export class ReminderHub extends DurableObject {
     catch { await tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: mid, reply_markup: { inline_keyboard: [] } }).catch(() => {}); }
   }
   // Aynı gerçekleşmenin önceki hatırlatmalarını kaldır: sohbette hep yalnız sonuncusu durur.
-  async dropReminders(itemId, origin) {
+  async dropReminders(itemId, tro, keep) {
     const list = this.s.msgs[itemId] || [];
-    const old = list.filter(m => m[3] === 'r' && m[2] === origin);
+    const isOld = m => m[3] === 'r' && m[2] === tro && m[0] !== keep;
+    const old = list.filter(isOld);
     if (!old.length) return;
-    this.s.msgs[itemId] = list.filter(m => !(m[3] === 'r' && m[2] === origin));
+    this.s.msgs[itemId] = list.filter(m => !isOld(m));
     for (const [mid] of old) await this.dropMessage(mid);
   }
-  dueLabel(due) {
-    const tz = this.tz, today = dayAt(Date.now(), tz), d = dayAt(due, tz);
-    const hm = new Intl.DateTimeFormat('tr-TR', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(due));
-    if (d === today) return hm;
-    if (d === dayAdd(today, 1)) return `Yarın ${hm}`;
-    return new Intl.DateTimeFormat('tr-TR', { timeZone: tz, day: 'numeric', month: 'short' }).format(new Date(due)) + ' ' + hm;
-  }
-  async snoozeUntil(itemId, origin, due, prevMid) {
-    const s = this.s, item = s.cal.items.find(x => x.id === itemId);
+
+  // ---------- Gerçekleşme ve erteleme ----------
+  // origin: tek seferlik planda kendi tarihi; tro: mesaj takibindeki anahtarı ('' = planın tamamı)
+  pick(itemId, origin = '', items = this.s.cal.items) {
+    const item = items.find(x => x.id === itemId);
     if (!item) return null;
-    const o = occurrence(item, origin);
-    s.snooze = s.snooze.filter(z => !(z.itemId === itemId && z.origin === origin));
-    s.snooze.push({ id: uid(), itemId, origin, title: o.title, icon: o.icon || '', date: o.date, time: o.time, start: o.time ? zonedMs(o.date, o.time, this.tz) : null, due, prevMid });
-    await this.save('snooze');
-    await this.schedule();
-    const label = this.dueLabel(due);
-    if (prevMid) await tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: prevMid, reply_markup: buttons([[['✓ Tamamlandı', `d:${itemId}:${origin}`], [`⏰ ${label}`, `e:${itemId}:${origin}`]]]) }).catch(() => {});
-    return label;
+    const once = item.repeat === 'none', key = once ? item.date || '' : origin;
+    // Plan sonradan tekrarlı olduysa eski mesajın anahtarı geçersizdir; istisna olarak yazılırsa planı bozar.
+    if (!once && !activeOn(item, key)) return null;
+    return { item, origin: key, tro: once ? '' : key, o: occurrence(item, key) };
   }
-  // "42 dk", "1 gün 5 saat", "1g", "21:30", "yarın 9'da" → zaman damgası
-  snoozeDue(text) {
-    const now = Date.now(), tz = this.tz, today = dayAt(now, tz);
-    const mins = parseDurations(text);
-    if (mins?.length) { const m = Math.max(...mins); if (m > 0) return now + m * 60000; }
-    const r = parse(text, { now, tz });
-    if (r.found?.date) { const d = zonedMs(r.date, r.time || '09:00', tz); return d > now ? d : null; }
-    const c = parseClock(text, { now, tz });
-    if (c) { let d = zonedMs(today, c, tz); if (d <= now) d = zonedMs(dayAdd(today, 1), c, tz); return d; }
+  pending(c) { return Boolean(c) && statusOf(c.item, c.origin) === 'pending'; }
+  patchPlan(c, patch) {
+    const i = this.s.cal.items.findIndex(x => x.id === c.item.id);
+    this.s.cal.items[i] = patchOccurrence(this.s.cal.items[i], c.origin, patch);
+    this.pushEvent({ type: 'patch', id: c.item.id, origin: c.origin, patch });
+  }
+  // Hatırlatma kartının o anki hâli: normal, menü açık ya da ertelenmiş
+  reminderView(c, mode = '') {
+    const prefs = this.s.cal.prefs, tz = this.tz, now = Date.now(), today = dayAt(now, tz), { o } = c;
+    const z = snoozeOf(o), moved = movedTo(o, prefs);
+    const waiting = !mode && z && z.until > now;
+    const job = { title: o.title, icon: o.icon, bill: o.bill, date: o.date, end: o.end, time: o.time };
+    if (moved && !waiting) { job.date = dayAt(moved, tz); job.time = hmAt(moved, tz); }
+    const text = waiting ? snoozedMessage(job, z.until, today, tz) : mode === 'snooze' ? snoozeMenuMessage(job, today) : reminderMessage(job, today);
+    return { text, markup: reminderButtons(c.item.id, c.origin, { mode: waiting ? 'snoozed' : mode, bill: o.bill }) };
+  }
+  async paintReminder(c, mid, mode = '') {
+    const v = this.reminderView(c, mode);
+    await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: mid, text: v.text, parse_mode: 'HTML', reply_markup: v.markup }).catch(() => {});
+  }
+  async refreshReminder(itemId, origin) {
+    const c = this.pick(itemId, origin);
+    if (!this.pending(c)) return;
+    for (const m of this.s.msgs[itemId] || []) if (m[3] === 'r' && m[2] === c.tro) await this.paintReminder(c, m[0]);
+  }
+  // Uygulamadan yapılan erteleme Telegram'daki karta da yansır.
+  snoozeChanges(before, after) {
+    const out = new Map();
+    for (const [id, list] of Object.entries(this.s.msgs)) {
+      for (const m of list) {
+        if (m[3] !== 'r') continue;
+        const was = this.pick(id, m[2], before), now = this.pick(id, m[2], after);
+        if (was && now && (snoozeOf(was.o)?.until || 0) !== (snoozeOf(now.o)?.until || 0)) out.set(`${id}:${now.origin}`, [id, now.origin]);
+      }
+    }
+    return [...out.values()];
+  }
+  // Erteleme hep basılan/yazılan andan sayılır (until çağırandan o ana göre gelir).
+  async snoozeUntil(c, until, at) {
+    if (this.s.snoozeAwait?.itemId === c.item.id) this.s.snoozeAwait = null;
+    this.patchPlan(c, { snooze: makeSnooze(c.o, until, at) });
+    await this.save('cal', 'events', 'seq', 'snoozeAwait', 'msgs');
+    await this.schedule();
+    await this.refreshReminder(c.item.id, c.origin);
+    return whenAt(until, this.tz, dayAt(at, this.tz));
+  }
+  reminderByMessage(mid) {
+    if (!mid) return null;
+    for (const [id, list] of Object.entries(this.s.msgs)) {
+      for (const m of list) {
+        if (m[0] !== mid || m[3] !== 'r') continue;
+        const c = this.pick(id, m[2]);
+        return this.pending(c) ? { ...c, sentAt: m[1] } : null;
+      }
+    }
     return null;
+  }
+  latestReminder(now) {
+    let best = null;
+    for (const [id, list] of Object.entries(this.s.msgs)) {
+      for (const [, sentAt, tro, kind] of list) {
+        if (kind !== 'r' || sentAt < now - LIVE_MS || (best && sentAt < best.sentAt)) continue;
+        const c = this.pick(id, tro);
+        if (this.pending(c)) best = { ...c, sentAt };
+      }
+    }
+    return best;
+  }
+  // Sohbete yazılan ya da söylenen süre. true: mesaj erteleme olarak işlendi.
+  async typedSnooze(text, userMid, replyTo, draftAt, editing) {
+    const s = this.s, now = Date.now(), tz = this.tz;
+    const replied = this.reminderByMessage(replyTo);
+    const w = s.snoozeAwait;
+    const opened = w && w.at > now - AWAIT_MS && w.at >= (editing ? draftAt : 0) ? this.pick(w.itemId, w.origin) : null;
+    const asked = replied || (this.pending(opened) ? opened : null);
+    const hint = async (msg, c) => {
+      const m = await send(this.env, this.chatId, msg);
+      if (c) {
+        this.track(c.item.id, m?.message_id, c.tro, 'x');
+        this.track(c.item.id, userMid, c.tro, 'x');
+        await this.save('msgs');
+      }
+      return true;
+    };
+    let target = asked, until = null;
+    if (asked) {
+      until = parseUntil(text, { now, tz, bare: true });
+      if (!until) {
+        const r = parse(text, { now, tz }), words = text.trim().split(/\s+/).length;
+        const unclear = replied || words === 1 || (!r.title && r.kind !== 'note') || (words <= 4 && /(?<!\p{L})(?:dakika|dk|saat|ertele)/iu.test(text) && !r.found.time && !r.found.date);
+        if (unclear) return hint('Süreyi anlayamadım. Örnek: <i>42 dk</i>, <i>1 gün 5 saat</i>, <i>21:30</i>', asked);
+        // Açıkça yeni bir plan yazıldı: erteleme beklemesi biter.
+        s.snoozeAwait = null;
+        await this.save('snoozeAwait');
+        return false;
+      }
+    } else {
+      if (editing) return false;
+      const live = this.latestReminder(now);
+      // Hatırlatmanın ardından yazılan çıplak sayı dakikadır ("15"), dört hane saattir ("2130").
+      const bare = Boolean(live) && !draftAt && /^\s*\d{1,4}\.?\s*$/.test(text);
+      const span = parseSpan(text, { bare });
+      const editsDraft = draftAt && (!live || draftAt > live.sentAt);
+      if (span && !editsDraft && live) target = live;
+      else if (span && !editsDraft) return hint('Ertelenecek bir hatırlatma yok. Plan eklemek için ne yapılacağını da yaz: <i>20 dakika sonra çayı demle</i>');
+      else if (span) {
+        const f = parse(text, { now, tz }).found;
+        return f.date || f.time || f.reminders ? false : hint('Taslaktaki hatırlatma için <i>1 saat önce</i> gibi yaz.');
+      } else if (!draftAt && live) target = live;
+      else return false;
+      until = parseUntil(text, { now, tz, bare });
+      if (!until) return false;
+    }
+    await this.snoozeUntil(target, until, now);
+    await this.dropMessage(userMid);
+    const asides = (s.msgs[target.item.id] || []).filter(m => m[3] === 'x' && m[2] === target.tro);
+    for (const [mid] of asides) await this.dropMessage(mid, target.item.id);
+    await this.save('msgs');
+    return true;
   }
 
   async purge(key, origin = null) {
@@ -273,7 +403,7 @@ export class ReminderHub extends DurableObject {
   }
   async aiOnly(text, now, tz) {
     if (!this.env.AI) return { result: null };
-    return { result: await aiParse(this.env, text.slice(0, 500), { now, tz: tz || this.tz }) };
+    return { result: await aiParse(this.env, text.slice(0, 4000), { now, tz: tz || this.tz }) };
   }
 
   async addText(text) {
@@ -295,12 +425,19 @@ export class ReminderHub extends DurableObject {
   }
 
   async quick(text) {
-    text = text.trim().slice(0, 500);
+    text = text.trim().slice(0, 4000);
     if (!text) throw Error('Boş metin.');
-    const today = dayAt(Date.now(), this.tz);
+    const now = Date.now(), today = dayAt(now, this.tz);
+    // Kısayola yalnız süre söylendiyse ("20 dakika ertele") son hatırlatma ertelenir.
+    if (parseSpan(text)) {
+      const live = this.latestReminder(now);
+      if (!live) throw Error('Ertelenecek bir hatırlatma yok.');
+      const label = await this.snoozeUntil(live, parseUntil(text, { now, tz: this.tz }), now);
+      return { text: `⏰ ${live.o.title}\nErtelendi: ${label}` };
+    }
     const res = await this.addText(text);
     if (res.note) return { text: `📝 Not eklendi: ${res.note.text}` };
-    const plain = addedMessage(res.item, today, res.ai).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const plain = addedMessage(res.item, today, res.ai, this.s.cal.prefs).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     return { text: plain };
   }
 
@@ -322,45 +459,33 @@ export class ReminderHub extends DurableObject {
     const text = (msg.text || '').trim();
     if (!text) return;
     if (text.startsWith('/')) return this.command(text, msg.message_id);
-    return this.reply(text, false, msg.message_id);
+    return this.reply(text, false, msg.message_id, msg.reply_to_message?.message_id);
   }
 
   // Serbest metin/ses: hemen eklemez, düğmeli taslak gösterir. Notlar doğrudan kaydedilir.
-  async reply(text, voice, userMid = 0) {
+  async reply(text, voice, userMid = 0, replyTo = 0) {
     const s = this.s, now = Date.now();
     const head = voice ? `🎙 <i>“${esc(text)}”</i>\n\n` : '';
     for (const [id, d] of Object.entries(s.drafts)) if (d.at < now - 86400000) { delete s.drafts[id]; await this.purge('draft:' + id); }
-    const w = s.snoozeAwait;
-    if (w && w.at > now - 15 * 60000) {
-      const due = this.snoozeDue(text);
-      if (!due) {
-        const m = await send(this.env, this.chatId, 'Süreyi anlayamadım. Örnek: <i>42 dk</i>, <i>1 gün 5 saat</i>, <i>1g</i>, <i>21:30</i>');
-        this.track(w.itemId, m?.message_id, w.tro ?? w.origin, 'x');
-        this.track(w.itemId, userMid, w.tro ?? w.origin, 'x');
-        await this.save('msgs');
-        return;
-      }
-      s.snoozeAwait = null;
-      await this.save('snoozeAwait');
-      await this.dropMessage(userMid);
-      if (w.prompt) await this.dropMessage(w.prompt, w.itemId);
-      for (const [mid] of (s.msgs[w.itemId] || []).filter(m => m[3] === 'x' && m[2] === (w.tro ?? w.origin))) await this.dropMessage(mid, w.itemId);
-      await this.snoozeUntil(w.itemId, w.origin, due, w.mid);
-      return;
-    }
+    const drafts = Object.values(s.drafts).filter(d => d.at > now - 30 * MINUTE).sort((a, b) => b.at - a.at);
+    const awaiting = drafts.find(d => d.await), open = drafts[0];
+    if (await this.typedSnooze(text, userMid, replyTo, (awaiting || open)?.at || 0, Boolean(awaiting))) return;
     // Taslakta bir menü açıksa (Yazı, Gün, Saat, Hatırlat) yazılan metin o alana gider.
-    const awaiting = Object.values(s.drafts).filter(d => d.await && d.at > now - 30 * 60000).sort((a, b) => b.at - a.at)[0];
     if (awaiting) return this.applyTyped(awaiting, text, voice, userMid);
     // Açık taslak varken yalnız zaman bilgisi yazılırsa ("yarın 10'da") taslağı düzelt.
     const rule = parse(text, { now, tz: this.tz });
-    const open = Object.values(s.drafts).filter(d => d.at > now - 30 * 60000).sort((a, b) => b.at - a.at)[0];
     const f = rule.found || {};
     if (open && !rule.title && (f.date || f.time || f.repeat || f.reminders)) {
       const it = open.item;
-      if (f.repeat) { it.repeat = rule.repeat; it.weekdays = rule.weekdays; it.date = rule.date || it.date || dayAt(now, this.tz); }
-      else if (f.date) { it.date = rule.date; it.repeat = 'none'; it.weekdays = []; }
-      if (f.time) { it.time = rule.time; it.endTime = rule.endTime; if (!it.date) it.date = rule.date || dayAt(now, this.tz); }
-      if (f.reminders) it.reminders = rule.reminders;
+      if (it.bill) {
+        if (f.time) it.time = rule.time;
+        if (f.reminders) it.bill = { ...it.bill, before: remDays(rule.reminders) };
+      } else {
+        if (f.repeat) { it.repeat = rule.repeat; it.interval = rule.interval; it.weekdays = rule.weekdays; it.date = rule.date || it.date || dayAt(now, this.tz); }
+        else if (f.date) { it.date = rule.date; it.repeat = 'none'; it.weekdays = []; }
+        if (f.time) { it.time = rule.time; it.endTime = rule.endTime; if (!it.date) it.date = rule.date || dayAt(now, this.tz); }
+        if (f.reminders) it.reminders = rule.reminders;
+      }
       open.item = cleanItem(it);
       this.track('draft:' + open.id, userMid);
       await this.dropMessage(open.mid, 'draft:' + open.id);
@@ -396,10 +521,11 @@ export class ReminderHub extends DurableObject {
     } else if (d.await === 'rem' && parseNag(text) !== null) {
       const v = parseNag(text);
       it.nag = v || null;
-      if (v && !it.time) err = 'Tekrar hatırlatma için önce saat seç.';
+      if (v && !it.date) err = 'Tekrar hatırlatma için önce gün seç.';
     } else if (d.await === 'rem') {
       const v = parseDurations(text);
       if (v === null) err = 'Süreyi anlayamadım. Örnek: <i>30 dk</i>, <i>1 sa 15 dk</i>, <i>10 ve 15 dk</i>';
+      else if (v.length && !it.date) err = 'Hatırlatma için önce gün seç.';
       else it.reminders = v;
     } else if (d.await === 'time') {
       const c = parseClock(text, { now, tz });
@@ -407,7 +533,7 @@ export class ReminderHub extends DurableObject {
       else { it.time = c; it.endTime = ''; if (!it.date) it.date = today; }
     } else if (d.await === 'day') {
       const r = parse(text, { now, tz });
-      if (r.found?.repeat) { it.repeat = r.repeat; it.weekdays = r.weekdays; it.date = r.date || it.date || today; }
+      if (r.found?.repeat) { it.repeat = r.repeat; it.interval = r.interval; it.weekdays = r.weekdays; it.date = r.date || it.date || today; }
       else if (r.found?.date) { it.date = r.date; it.repeat = 'none'; it.weekdays = []; }
       else err = 'Tarihi anlayamadım. Örnek: <i>20 Aralık</i>, <i>20 Aralık 2027</i>, <i>haftaya cuma</i>';
       if (!err && r.found?.time) { it.time = r.time; it.endTime = r.endTime; }
@@ -428,7 +554,7 @@ export class ReminderHub extends DurableObject {
   }
 
   async showDraft(draft, mode = 'main', fresh = false) {
-    const view = draftView(draft, dayAt(Date.now(), this.tz), mode, this.s.cal.prefs.reminderDefaults);
+    const view = draftView(draft, dayAt(Date.now(), this.tz), mode, this.s.cal.prefs);
     if (fresh || !draft.mid) {
       const m = await send(this.env, this.chatId, view.text, view.markup);
       draft.mid = m?.message_id || 0;
@@ -463,7 +589,7 @@ export class ReminderHub extends DurableObject {
       await this.save('cal', 'events', 'seq', 'drafts', 'msgs');
       await this.schedule();
       await answer('Eklendi ✓');
-      await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: addedMessage(item, today, false), parse_mode: 'HTML', reply_markup: buttons([[['↩︎ Geri al', `u:${item.id}`]]]) }).catch(() => {});
+      await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: addedMessage(item, today, false, s.cal.prefs), parse_mode: 'HTML', reply_markup: buttons([[['↩︎ Geri al', `u:${item.id}`]]]) }).catch(() => {});
       for (const [mid] of extra) await this.dropMessage(mid);
       return;
     }
@@ -495,16 +621,18 @@ export class ReminderHub extends DurableObject {
     } else if (op === 'r') {
       if (arg === 'none') it.reminders = [];
       else {
-        const v = Number(arg), cur = it.reminders ?? s.cal.prefs.reminderDefaults;
+        const v = readRem(arg), cur = it.reminders ?? (it.time ? s.cal.prefs.reminderDefaults : []);
+        if (v === null) return answer('Süre geçersiz');
         it.reminders = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
       }
       mode = 'rem'; d.await = 'rem';
     } else if (op === 'p') {
       const start = it.date || today;
       it.date = start;
+      it.interval = 1;
       if (arg === 'none') { it.repeat = 'none'; it.weekdays = []; }
       else if (arg === 'daily') { it.repeat = 'daily'; it.weekdays = []; }
-      else if (arg === 'monthly') { it.repeat = 'monthly'; it.weekdays = []; }
+      else if (arg === 'monthly' || arg === 'yearly') { it.repeat = arg; it.weekdays = []; }
       else if (arg === 'weekdays') { it.repeat = 'weekly'; it.weekdays = [1, 2, 3, 4, 5]; }
       else if (arg === 'weekend') { it.repeat = 'weekly'; it.weekdays = [6, 0]; }
       else { it.repeat = 'weekly'; it.weekdays = [weekday(start)]; }
@@ -524,7 +652,7 @@ export class ReminderHub extends DurableObject {
       if (!res.ok) throw Error('Ses dosyası alınamadı.');
       const text = await transcribe(this.env, await res.arrayBuffer());
       if (!text) return send(this.env, this.chatId, 'Sesi anlayamadım, tekrar dener misin?');
-      return this.reply(text, true, msg.message_id);
+      return this.reply(text, true, msg.message_id, msg.reply_to_message?.message_id);
     } catch (e) {
       return send(this.env, this.chatId, `Sesli mesaj çözülemedi: ${esc(e.message)}`);
     }
@@ -538,7 +666,7 @@ export class ReminderHub extends DurableObject {
     const items = s.cal.items;
     if (cmd === '/bugun' || cmd === '/yarin') {
       const day = cmd === '/yarin' ? dayAdd(today, 1) : today;
-      const { text: body, list } = dayList(items, day, today);
+      const { text: body, list } = dayList(items, day, today, 0, s.cal.prefs);
       s.lastList = list.map(o => [o.id, o.origin]);
       await this.save('lastList');
       const inbox = cmd === '/bugun' ? inboxList(items) : '';
@@ -548,7 +676,7 @@ export class ReminderHub extends DurableObject {
       const parts = [];
       s.lastList = [];
       for (let i = 0; i < 7; i++) {
-        const { text: body, list } = dayList(items, dayAdd(today, i), today, s.lastList.length);
+        const { text: body, list } = dayList(items, dayAdd(today, i), today, s.lastList.length, s.cal.prefs);
         if (list.length) { parts.push(body); s.lastList.push(...list.map(o => [o.id, o.origin])); }
       }
       await this.save('lastList');
@@ -572,16 +700,13 @@ export class ReminderHub extends DurableObject {
   }
 
   async markDone(itemId, origin) {
-    const s = this.s;
-    s.snooze = s.snooze.filter(z => !(z.itemId === itemId && z.origin === origin));
+    const s = this.s, c = this.pick(itemId, origin);
+    if (!c) return null;
     if (s.snoozeAwait?.itemId === itemId) s.snoozeAwait = null;
-    const i = s.cal.items.findIndex(x => x.id === itemId);
-    if (i < 0) return null;
-    s.cal.items[i] = patchOccurrence(s.cal.items[i], origin, { status: 'done' });
-    this.pushEvent({ type: 'patch', id: itemId, origin, patch: { status: 'done' } });
-    await this.save('cal', 'events', 'seq');
+    this.patchPlan(c, donePatch(c.item, 'done', dayAt(Date.now(), this.tz)));
+    await this.save('cal', 'events', 'seq', 'snoozeAwait');
     await this.schedule();
-    return s.cal.items[i].title;
+    return c.item.title;
   }
 
   async callback(cb) {
@@ -592,34 +717,32 @@ export class ReminderHub extends DurableObject {
     const edit = text => tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: cb.message.message_id, text, parse_mode: 'HTML' }).catch(() => {});
     if (k === 'd') {
       const item = s.cal.items.find(x => x.id === a);
-      if (!item) { await answer('Bu plan artık yok'); return this.dropMessage(cb.message.message_id); }
+      if (!item || !this.pick(a, b)) { await answer('Bu plan artık yok'); return this.dropMessage(cb.message.message_id); }
       const already = statusOf(item, b) === 'done';
       if (!already) await this.markDone(a, b);
-      await answer(already ? 'Zaten tamamlanmış' : 'Tamamlandı ✓');
+      await answer(already ? 'Zaten tamamlanmış' : item.bill ? `${item.bill.auto ? 'Çekildi' : 'Ödendi'} ✓` : 'Tamamlandı ✓');
       const origin = item.repeat === 'none' ? '' : b;
       this.track(a, cb.message.message_id, origin);
       return this.purge(a, item.repeat === 'none' ? null : b);
     }
-    const markup = m => tg(this.env, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: cb.message.message_id, reply_markup: m }).catch(() => {});
-    if (k === 'e' || k === 'b' || k === 'z' || k === 'w') {
-      const item = s.cal.items.find(x => x.id === a);
-      if (!item || statusOf(item, b) !== 'pending') { await answer(item ? 'Zaten tamamlanmış' : 'Bu plan artık yok'); return this.dropMessage(cb.message.message_id, a); }
-      if (k === 'e') { await answer(''); return markup(reminderButtons(a, b, 'snooze')); }
-      if (k === 'b') { if (s.snoozeAwait?.itemId === a) { s.snoozeAwait = null; await this.save('snoozeAwait'); } await answer(''); return markup(reminderButtons(a, b)); }
+    // e: Ertele menüsü (w: eski mesajlardaki "Süre yaz"), z: hazır süre, b: geri
+    if (k === 'e' || k === 'w' || k === 'b' || k === 'z') {
+      const now = Date.now(), mid = cb.message.message_id, plan = this.pick(a, b);
+      if (!this.pending(plan)) { await answer(plan ? 'Zaten tamamlanmış' : 'Bu plan artık yok'); return this.dropMessage(mid, a); }
+      this.track(a, mid, plan.tro, 'r');
       if (k === 'z') {
-        const min = Math.min(Math.max(parseInt(c, 10) || 10, 1), 40320);
-        const label = await this.snoozeUntil(a, b, Date.now() + min * 60000, cb.message.message_id);
-        return answer(`⏰ ${label} için ertelendi`);
+        const min = Number(c);
+        if (!(min > 0 && min <= MAX_MINUTES)) return answer('Süre geçersiz');
+        const label = await this.snoozeUntil(plan, now + min * MINUTE, now);
+        return answer(`⏰ Ertelendi: ${label}`);
       }
-      // ✏️ Süre yaz: sıradaki mesaj süre olarak okunur
-      await answer('Süreyi yaz');
-      await markup(buttons([[['← Geri', `b:${a}:${b}`]]]));
-      const m = await send(this.env, this.chatId, '⏰ Ne zaman tekrar hatırlatayım?\n<i>42 dk</i> · <i>1 gün 5 saat</i> · <i>1g</i> · <i>21:30</i> · <i>yarın 9\'da</i>');
-      const origin = item.repeat === 'none' ? '' : b;
-      this.track(a, m?.message_id, origin, 'x');
-      s.snoozeAwait = { itemId: a, origin: b, tro: origin, mid: cb.message.message_id, prompt: m?.message_id, at: Date.now() };
+      const menu = k !== 'b';
+      // Menü açıldığı anda sohbet süre bekler; ayrıca bir düğmeye basmak gerekmez.
+      if (menu) s.snoozeAwait = { itemId: a, origin: plan.origin, at: now };
+      else if (s.snoozeAwait?.itemId === a) s.snoozeAwait = null;
       await this.save('snoozeAwait', 'msgs');
-      return;
+      await answer(menu ? 'Süreye dokun ya da sohbete yaz' : '');
+      return this.paintReminder(plan, mid, menu ? 'snooze' : '');
     }
     if (k === 'u') {
       const item = s.cal.items.find(x => x.id === a);
@@ -690,13 +813,14 @@ export class ReminderHub extends DurableObject {
     let failed = false;
     const deliver = async (key, text, markup, itemId = '', origin = '', kind = '') => {
       try {
-        if (itemId && kind === 'r') await this.dropReminders(itemId, origin);
         const m = await send(this.env, chat, text, markup);
         if (itemId) this.track(itemId, m?.message_id, origin, kind);
         s.sent[key] = now;
         s.stat.send = now;
         s.stat.error = '';
         delete s.tries[key];
+        // Yenisi ulaştıktan sonra eskisi silinir; gönderim düşerse sohbet boş kalmaz.
+        if (itemId && kind === 'r') await this.dropReminders(itemId, origin, m?.message_id);
       } catch (e) {
         failed = true;
         s.stat.error = String(e.message).slice(0, 200);
@@ -708,24 +832,19 @@ export class ReminderHub extends DurableObject {
     // Geç kalınmış birden fazla iş varsa (ör. tekrar hatırlatmalar) her gerçekleşme için yalnız sonuncusu gider.
     const due = jobsFor(s.cal.items, s.cal.prefs, now, 1).filter(j => j.due <= now + 5000 && !s.sent[j.id]);
     const latest = new Map();
-    const snoozed = new Set(s.snooze.filter(z => z.itemId && z.due > now + 5000).map(z => `${z.itemId}:${z.origin}`));
     for (const j of due) {
       const k = `${j.itemId}:${j.origin}`, prev = latest.get(k);
-      // Ertelenmiş gerçekleşmede ara hatırlatmalar susar; ertelenen zamanda tek mesaj gelir.
-      if (snoozed.has(k)) { s.sent[j.id] = now; continue; }
       if (!prev || j.due >= prev.due) { if (prev) s.sent[prev.id] = now; latest.set(k, j); } else s.sent[j.id] = now;
     }
     for (const j of [...latest.values()].slice(0, 20)) {
-      const rep = s.cal.items.find(i => i.id === j.itemId)?.repeat !== 'none';
-      await deliver(j.id, reminderMessage(j, today), reminderButtons(j.itemId, j.origin), j.itemId, rep ? j.origin : '', 'r');
+      // Önceki gönderim sırasında tamamlanmış ya da ertelenmiş olabilir.
+      const c = this.pick(j.itemId, j.origin);
+      if (!this.pending(c)) { s.sent[j.id] = now; continue; }
+      if ((snoozeOf(c.o)?.until || 0) > now + 5000) continue;
+      await deliver(j.id, reminderMessage(j, today), reminderButtons(j.itemId, j.origin, { bill: j.bill }), j.itemId, c.tro, 'r');
     }
-    const ready = s.snooze.filter(z => z.due <= now + 5000);
-    for (const z of ready) {
-      const item = z.itemId && s.cal.items.find(i => i.id === z.itemId);
-      if (z.itemId && (!item || statusOf(item, z.origin) !== 'pending')) { s.snooze = s.snooze.filter(x => x.id !== z.id); continue; }
-      const text = z.test ? '🔔 <b>Deneme hatırlatması</b>\nUygulama kapalıyken de buraya gelir.' : reminderMessage({ title: z.title, icon: z.icon ?? item?.icon ?? '', date: z.date || today, time: z.time || '' }, today);
-      const zr = item && item.repeat !== 'none';
-      await deliver('z:' + z.id, text, z.itemId ? reminderButtons(z.itemId, z.origin) : undefined, z.itemId || '', zr ? z.origin : '', z.itemId ? 'r' : '');
+    for (const z of s.snooze.filter(x => x.test && x.due <= now + 5000)) {
+      await deliver('z:' + z.id, '🔔 <b>Deneme hatırlatması</b>\nUygulama kapalıyken de buraya gelir.');
       if (s.sent['z:' + z.id]) s.snooze = s.snooze.filter(x => x.id !== z.id);
     }
     const dg = this.nextDigest(now);

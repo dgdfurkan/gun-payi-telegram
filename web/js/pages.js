@@ -1,5 +1,5 @@
 // Notlar, Özet (haftalık değerlendirme) ve Ayarlar.
-import { itemsOn, dayAdd, mondayOf, dayLabel, MONTHS, remindersLabel, patchOccurrence, isTime } from './core.js';
+import { itemsOn, dayAdd, dayAt, mondayOf, dayLabel, MONTHS, remindersLabel, patchOccurrence, movedTo, sortRems, isTime } from './core.js';
 import { get, commit, backupText, parseBackup } from './store.js';
 import { icon } from './icons.js';
 import { $, esc, haptic, toast, sheet, confirmDanger, copyText, actions, applyTheme } from './ui.js';
@@ -8,7 +8,7 @@ import * as api from './api.js';
 import { appbar, hero } from './chrome.js';
 import { avatarHTML, openAvatarSheet } from './avatar.js';
 import { catOf } from './categories.js';
-import { tile } from './pickers.js';
+import { tile, wheelHTML, bindWheel, reminderHTML, handleCustom, toggleReminder, withTypedReminder } from './pickers.js';
 import { VERSION } from './version.js';
 
 const COLOR_DOTS = [['yesil', 'Nane', '#006c49', '#10b981'], ['indigo', 'İndigo', '#5140c8', '#7c6cf2'], ['mor', 'Lavanta', '#6b2fd3', '#9a6bff'], ['mavi', 'Okyanus', '#0b57d0', '#3b8bff'], ['gunbatimi', 'Gün batımı', '#b8430d', '#fb7a2b']];
@@ -46,7 +46,10 @@ export function renderReview() {
     for (const o of itemsOn(s.items, d)) {
       total++;
       if (o.status === 'done') done++;
-      else if (d < t) open.push(o);
+      else if (d < t && !o.bill) {
+        const moved = movedTo(o, s.prefs);
+        if (!moved || dayAt(moved, s.prefs.timeZone) < t) open.push(o);
+      }
     }
   }
   const upcoming = Array.from({ length: 7 }, (_, i) => itemsOn(s.items, dayAdd(mon, 7 + i)).length).reduce((a, b) => a + b, 0);
@@ -108,8 +111,12 @@ export function renderSettings() {
       <div class="look"><span>Mod</span><div class="seg" style="--i:${modeIdx}">${MODE_LIST.map(([k, label]) => `<button type="button" data-act="ui-mode" data-m="${k}" aria-pressed="${s.prefs.mode === k}">${label}</button>`).join('')}</div></div>
     </div>
     <div class="section-h">Telegram</div>${tg}
-    <div class="section-h">Varsayılan hatırlatma</div>
-    <div class="group pad"><div class="picker-row">${[[0, 'Vaktinde'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [1440, '1 gün']].map(([v, lb]) => `<button type="button" class="chip ${rem.includes(v) ? 'on' : ''}" data-act="def-rem" data-v="${v}">${lb}</button>`).join('')}</div></div>
+    <div class="section-h">Hatırlatma</div>
+    <div class="group">
+      <button type="button" class="cell" data-act="def-rem"><span class="cell-ic">${icon('bell')}</span><span class="cell-label">Saatli planlar<small>${esc(remindersLabel(rem))}</small></span>${icon('chevR', 'chev')}</button>
+      <button type="button" class="cell" data-act="allday-time"><span class="cell-ic orange">${icon('clock')}</span><span class="cell-label">Saatsiz plan ve faturalar<small>Hatırlatma bu saatte gelir</small></span><span class="cell-value">${s.prefs.allDayTime}</span>${icon('chevR', 'chev')}</button>
+      ${s.prefs.digest.on ? `<button type="button" class="cell" data-act="digest-at"><span class="cell-ic green">${icon('sun')}</span><span class="cell-label">Sabah özeti saati</span><span class="cell-value">${s.prefs.digest.time}</span>${icon('chevR', 'chev')}</button>` : ''}
+    </div>
     <div class="section-h">Hızlı ekleme</div>
     <div class="group"><button type="button" class="cell" data-act="widget"><span class="cell-ic">${icon('widget')}</span><span class="cell-label">Ana ekrandan ekle<small>Telegram widget’ı ya da Siri kısayolu</small></span>${icon('chevR', 'chev')}</button></div>
     <div class="section-h">Veri</div>
@@ -247,6 +254,39 @@ function pastReview(week) {
   sheet({ title: `${+week.slice(8)} ${MONTHS[+week.slice(5, 7) - 1]} haftası`, left: 'Kapat', body: `<div class="form"><div class="group" style="margin-top:8px">${QUESTIONS.map((q, i) => `<div class="q"><label>${esc(q)}</label><div style="white-space:pre-wrap;-webkit-user-select:text;user-select:text">${esc(r.answers[i] || 'Boş')}</div></div>`).join('')}</div></div>` });
 }
 
+function defaultRemSheet() {
+  let list = [...get().prefs.reminderDefaults];
+  const body = () => `<div class="form"><div class="group pad">${reminderHTML(list)}</div><p class="section-f">Cümlede hatırlatma söylemediğin saatli planlarda geçerlidir.</p></div>`;
+  const sh = sheet({
+    title: 'Saatli planlar', right: 'Bitti', body: body(),
+    onRight: async a => {
+      list = withTypedReminder(a.body, list) || list;
+      await commit(s => { s.prefs.reminderDefaults = list; });
+      haptic('success'); a.close(); api.sync(true);
+    },
+  });
+  sh.body.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.rem) { list = toggleReminder(list, b.dataset.rem); haptic(); }
+    else if (b.dataset.rc || b.dataset.unit) {
+      const v = handleCustom(b);
+      if (v === null) return;
+      if (!list.includes(v)) list = sortRems([...list, v]);
+      haptic('success');
+    } else return;
+    sh.body.innerHTML = body();
+  });
+}
+function timeSheet(title, value, set) {
+  let picked = value;
+  sheet({
+    title, right: 'Bitti', body: `<div class="form"><div class="group pad">${wheelHTML(value)}</div></div>`,
+    onMount: sh => bindWheel(sh.body, v => { picked = v; }),
+    onRight: async a => { await commit(s => set(s, picked)); haptic('success'); a.close(); api.sync(true); },
+  });
+}
+
 let qTimer, nameTimer;
 export const pageActs = {
   note: el => import('./compose.js').then(m => m.openNote(el.dataset.id)),
@@ -266,11 +306,9 @@ export const pageActs = {
     if (!(await confirmDanger('Telegram bağlantısı kesilsin mi? Planların telefonda kalır.', 'Bağlantıyı kes'))) return;
     await api.unlink(); toast('Bağlantı kesildi'); prepareLink(true); ctx.render();
   },
-  'def-rem': el => {
-    const v = +el.dataset.v; haptic();
-    commit(s => { const r = s.prefs.reminderDefaults; s.prefs.reminderDefaults = r.includes(v) ? r.filter(x => x !== v) : [...r, v].sort((a, b) => b - a); });
-    api.sync();
-  },
+  'def-rem': () => { haptic(); defaultRemSheet(); },
+  'allday-time': () => { haptic(); timeSheet('Hatırlatma saati', get().prefs.allDayTime, (s, v) => { s.prefs.allDayTime = v; }); },
+  'digest-at': () => { haptic(); timeSheet('Sabah özeti', get().prefs.digest.time, (s, v) => { s.prefs.digest.time = v; }); },
   widget: () => widgetSheet(),
   avatar: () => { haptic(); openAvatarSheet(() => ctx.render()); },
   color: el => {

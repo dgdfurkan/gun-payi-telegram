@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { applyEvent, parseBackup, fresh } from '../web/js/store.js';
-import { itemsOn, jobsFor, remindersLabel, repeatLabel, cleanItem, patchOccurrence, zonedMs } from '../web/js/core.js';
+import { itemsOn, jobsFor, remindersLabel, repeatLabel, cleanItem, patchOccurrence, zonedMs, dayAdd, dayAt, activeOn, occurrence, cycleDays, remDue } from '../web/js/core.js';
 import { VERSION } from '../web/js/version.js';
 
 const item = (x = {}) => cleanItem({ id: 'a', title: 'Spor', date: '2026-11-18', time: '09:00', repeat: 'none', weekdays: [], ...x });
@@ -104,4 +104,40 @@ test('tekrar hatırlatma tamamlanana kadar iş üretir', () => {
   assert.ok(jobsFor([i], {}, start + 35 * 60000, 1).some(j => j.nag === 4), 'saat geçse de tekrarlar sürer');
   i = patchOccurrence(i, '2026-11-18', { status: 'done' });
   assert.equal(jobsFor([i], {}, start + 5 * 60000, 1).filter(j => j.origin === '2026-11-18').length, 0, 'tamamlanınca durur');
+});
+
+test('aylık 31, aralıklı ve yıllık tekrar doğru güne düşer', () => {
+  const m = item({ date: '2026-11-30', monthDay: 31, repeat: 'monthly' });
+  assert.equal(itemsOn([m], '2026-12-31').length, 1);
+  assert.equal(itemsOn([m], '2026-12-30').length, 0);
+  const two = item({ date: '2026-11-18', repeat: 'weekly', interval: 2, weekdays: [3] });
+  assert.deepEqual(['2026-11-25', '2026-12-02'].map(d => itemsOn([two], d).length), [0, 1]);
+  const y = item({ date: '2028-02-29', repeat: 'yearly' });
+  assert.deepEqual(['2029-02-28', '2029-03-28'].map(d => itemsOn([y], d).length), [1, 0]);
+});
+
+// Hızlı pencere hesabı, bütün günleri tek tek deneyen kaba hesapla aynı sonucu vermeli
+test('zamanlama: rastgele 1500 planda kaba hesapla birebir', () => {
+  const tz = 'Europe/Istanbul';
+  let seed = 7;
+  const rnd = n => { seed = (seed * 16807) % 2147483647; return seed % n; };
+  const REMS = [0, 1, 15, 75, 1440, 10080, 40320, 'M1', 'M2', 'M12', 'M1+4320'];
+  for (let n = 0; n < 1500; n++) {
+    const date = dayAdd('2026-01-01', rnd(500));
+    const repeat = ['none', 'daily', 'weekly', 'monthly', 'yearly'][rnd(5)];
+    const bill = rnd(5) === 0 ? { type: 'su', from: 1 + rnd(31), to: 1 + rnd(31), before: rnd(2) ? [1 + rnd(10)] : [], after: rnd(2) ? [1 + rnd(40)] : [] } : null;
+    const it = item({ date, time: ['00:05', '09:00', '20:10', '23:59'][rnd(4)], repeat, interval: 1 + rnd(3), weekdays: repeat === 'weekly' ? [rnd(7)] : [], reminders: [REMS[rnd(REMS.length)], REMS[rnd(REMS.length)]], bill });
+    const now = zonedMs(dayAdd('2026-06-01', rnd(500)), '12:00', tz) + rnd(86400) * 1000;
+    const lo = now - 30 * 60000, hi = now + 8 * 86400000, want = new Set();
+    const base = dayAdd(dayAt(now, tz), it.bill ? -110 : -2);
+    for (let i = 0; i < (it.bill ? 180 : 420); i++) {
+      const day = dayAdd(base, i);
+      if (!activeOn(it, day)) continue;
+      const o = occurrence(it, day), start = zonedMs(o.date, o.time, tz);
+      const dues = it.bill ? cycleDays(it.bill, day).map(d => zonedMs(d, o.time, tz)) : start >= now - 5 * 60000 ? it.reminders.map(v => remDue(v, o.date, o.time, tz)) : [];
+      for (const due of dues) if (due >= lo && due <= hi) want.add(`${day}@${due}`);
+    }
+    const got = new Set(jobsFor([it], { timeZone: tz }, now, 8).map(j => `${j.origin}@${j.due}`));
+    assert.deepEqual([...got].sort(), [...want].sort(), JSON.stringify(it) + ' @' + new Date(now).toISOString());
+  }
 });

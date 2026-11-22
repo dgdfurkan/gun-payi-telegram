@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { ReminderHub } from '../worker/index.js';
 import { webhookSecret } from '../worker/hub.js';
-import { clockAt, fromMin } from '../web/js/core.js';
+import { clockAt, fromMin, zonedMs, dayAt, hmAt, cleanItem, patchOccurrence, donePatch, makeSnooze } from '../web/js/core.js';
+import { applyEvent } from '../web/js/store.js';
 
 class Storage {
   constructor() { this.m = new Map(); this.alarm = null; }
@@ -112,16 +113,16 @@ test('Telegram serbest metni önce taslak olur, Ekle ile plana girer', async () 
   assert.match(draft.body.text, /📞 <b>Babaannemi ara<\/b>/);
   assert.match(draft.body.text, /Her Cuma/);
   assert.match(draft.body.text, /10, 15 dk önce/);
-  let sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  let sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.ok, true, 'taslak onaylanmadan plan eklenmez');
   await press(t, btn(draft, 'Ekle'));
   assert.match(lastSent(t).body.text, /✅/);
-  sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events.length, 1);
   const item = sync.events[0].item;
   assert.deepEqual(item.weekdays, [5]);
   assert.deepEqual(item.reminders, [15, 10]);
-  const second = await (await t.call('/api/sync', { auth, body: { cursor: sync.cursor, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } })).json();
+  const second = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: sync.cursor, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } })).json();
   assert.equal(second.ok, true);
   assert.ok(t.hubs.get('chat:42').store.alarm > Date.now());
 });
@@ -148,7 +149,7 @@ test('taslak düğmelerle ve yazarak düzeltilir', async () => {
   assert.match(fixed.body.text, /Yarın/);
   assert.match(fixed.body.text, /🕐 10:00/);
   await press(t, btn(fixed, 'Ekle'));
-  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events[0].item.time, '10:00');
   assert.equal(sync.events[0].item.repeat, 'none');
   await t.hook(message('Kitap oku'));
@@ -180,7 +181,7 @@ test('taslakta menüye girince yazılan metin o alana uygulanır', async () => {
   await t.hook(message('20 Aralık 2027'));
   assert.match(lastSent(t).body.text, /20 Aralık/);
   await press(t, btn(lastSent(t), 'Ekle'));
-  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   const it = sync.events[0].item;
   assert.equal(it.title, 'Akşam koşusu');
   assert.equal(it.date, '2027-12-20');
@@ -214,10 +215,10 @@ test('sohbet temizliği: eklenince ara mesajlar, bitince plan kartı silinir', a
   assert.ok(gone.includes(userMsg.message.message_id), 'kullanıcının mesajı silinir');
   assert.ok(gone.includes(typed.message.message_id), 'yazılan düzeltme silinir');
   assert.ok(!gone.includes(card), 'plan kartı kalır');
-  const first = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const first = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   const item = first.events[0].item;
-  await t.call('/api/sync', { auth, body: { cursor: first.cursor, items: [item], prefs: {} } });
-  await t.call('/api/sync', { auth, body: { cursor: first.cursor, items: [{ ...item, status: 'done' }], prefs: {} } });
+  await t.call('/api/sync', { auth, body: { proto: 2, cursor: first.cursor, items: [item], prefs: {} } });
+  await t.call('/api/sync', { auth, body: { proto: 2, cursor: first.cursor, items: [{ ...item, status: 'done' }], prefs: {} } });
   assert.ok(deleted(t).includes(card), 'uygulamada tamamlanınca kart silinir');
 });
 
@@ -226,7 +227,7 @@ test('hatırlatmadaki Tamamlandı mesajları siler, eskimiş düğme takılmaz',
   const auth = await linked(t);
   const { day, minutes } = clockAt(Date.now() + 2 * 60000, 'Europe/Istanbul');
   const item = { id: 'r1', title: 'İlaç', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], status: 'pending', exceptions: {} };
-  await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+  await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
   await t.hubs.get('chat:42').alarm();
   const reminder = t.calls.filter(c => c.method === 'sendMessage').at(-1);
   await press(t, reminder.body.reply_markup.inline_keyboard[0][0].callback_data, reminder.id);
@@ -241,7 +242,7 @@ test('saatsiz metin yapılacaklara düşer, not komutu not olur', async () => {
   await t.hook(message('Ekmek al'));
   await press(t, btn(lastSent(t), 'Ekle'));
   await t.hook(message('/not Widget fikri'));
-  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events[0].item.date, '');
   assert.equal(sync.events[1].type, 'note');
   assert.equal(sync.events[1].note.text, 'Widget fikri');
@@ -275,7 +276,7 @@ test('sesli mesaj Whisper ile yazıya çevrilir', async () => {
 test('kuralların anlamadığı cümle AI yedeğine gider', async () => {
   const t = setup();
   await linked(t);
-  await t.hook(message('her iki haftada bir saç kestir'));
+  await t.hook(message('gelecek ayın ilk cumasında saç kestir'));
   assert.ok(t.calls.some(c => c.ai?.includes('llama')));
   const reply = t.calls.filter(c => c.method === 'sendMessage').at(-1);
   assert.match(reply.body.text, /Saç kestir/);
@@ -287,7 +288,7 @@ test('alarm zamanı gelen hatırlatmayı gönderir, düğme tamamlar', async () 
   const auth = await linked(t);
   const { day, minutes } = clockAt(Date.now() + 2 * 60000, 'Europe/Istanbul');
   const item = { id: 'i1', title: 'İlaç', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], status: 'pending', exceptions: {} };
-  await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+  await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
   const hub = t.hubs.get('chat:42');
   await hub.alarm();
   const sent = t.calls.filter(c => c.method === 'sendMessage').at(-1);
@@ -297,7 +298,7 @@ test('alarm zamanı gelen hatırlatmayı gönderir, düğme tamamlar', async () 
   await hub.alarm();
   assert.equal(t.calls.filter(c => c.method === 'sendMessage' && /İlaç/.test(c.body.text)).length, 1, 'aynı hatırlatma iki kez gitmez');
   await press(t, done);
-  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: {} } })).json();
   assert.equal(sync.events.at(-1).type, 'patch');
   assert.equal(sync.events.at(-1).patch.status, 'done');
 });
@@ -329,7 +330,7 @@ test('tamamlanmayan plan tekrar hatırlatılır, sohbette tek hatırlatma kalır
   try {
     const { day, minutes } = clockAt(base - 25 * 60000, 'Europe/Istanbul');
     const item = { id: 'n1', title: 'Balıkların suyu', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [], nag: { every: 10, times: 5 }, status: 'pending', exceptions: {} };
-    await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+    await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
     const hub = t.hubs.get('chat:42');
     await hub.alarm();
     const nags = () => t.calls.filter(c => c.method === 'sendMessage' && /Balıkların/.test(c.body.text));
@@ -348,47 +349,6 @@ test('tamamlanmayan plan tekrar hatırlatılır, sohbette tek hatırlatma kalır
   } finally { Date.now = realNow; }
 });
 
-test('Ertele menüsü: hazır süreler ve yazarak süre', async () => {
-  const t = setup();
-  const auth = await linked(t);
-  const base = realNow();
-  try {
-    const { day, minutes } = clockAt(base + 2 * 60000, 'Europe/Istanbul');
-    const item = { id: 's1', title: 'Fatura öde', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], nag: { every: 10, times: 3 }, status: 'pending', exceptions: {} };
-    await t.call('/api/sync', { auth, body: { cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
-    const hub = t.hubs.get('chat:42');
-    await hub.alarm();
-    const rem = t.calls.filter(c => c.method === 'sendMessage').at(-1);
-    await press(t, btn(rem, 'Ertele'), rem.id);
-    const menu = edits(t).at(-1).body.reply_markup.inline_keyboard.flat().map(b => b.text);
-    for (const l of ['10 dk', '20 dk', '30 dk', '1 saat', '2 saat', 'Yarın', 'Süre yaz', 'Geri']) assert.ok(menu.some(x => x.includes(l)), l);
-    await press(t, `z:s1:${day}:60`, rem.id);
-    assert.equal(hub.s.snooze.length, 1);
-    assert.ok(Math.abs(hub.s.snooze[0].due - (base + 3600000)) < 5000);
-    assert.match(edits(t).at(-1).body.reply_markup.inline_keyboard.flat().map(b => b.text).join(' '), /⏰ \d\d:\d\d/);
-    await press(t, `w:s1:${day}`, rem.id);
-    const prompt = t.calls.filter(c => c.method === 'sendMessage').at(-1);
-    assert.match(prompt.body.text, /Ne zaman tekrar/);
-    await t.hook(message('anlamsız'));
-    assert.match(lastSent(t).body.text, /Süreyi anlayamadım/);
-    await t.hook(message('1 gün 5 saat'));
-    assert.equal(hub.s.snooze.length, 1, 'yeni erteleme eskisinin yerine geçer');
-    assert.ok(Math.abs(hub.s.snooze[0].due - (base + 29 * 3600000)) < 5000);
-    assert.ok(deleted(t).includes(prompt.id), 'soru mesajı silinir');
-    assert.equal(hub.s.snoozeAwait, null);
-    const before = t.calls.filter(c => c.method === 'sendMessage').length;
-    at(base + 30 * 60000);
-    await hub.alarm();
-    assert.equal(t.calls.filter(c => c.method === 'sendMessage').length, before, 'ertelenmişken ara tekrarlar susar');
-    at(base + 29 * 3600000 + 1000);
-    await hub.alarm();
-    const late = t.calls.filter(c => c.method === 'sendMessage').at(-1);
-    assert.match(late.body.text, /Fatura öde/);
-    assert.match(late.body.text, new RegExp(`^💳 <b>Fatura öde</b>\\n(?:.+ )?${item.time}$`), 'ertelenen de sade: iş ve planın saati');
-    assert.ok(deleted(t).includes(rem.id), 'eski hatırlatma yerini yenisine bırakır');
-  } finally { Date.now = realNow; }
-});
-
 test('taslakta tekrar hatırlatma düğmeyle ve yazarak seçilir', async () => {
   const t = setup();
   const auth = await linked(t);
@@ -399,6 +359,260 @@ test('taslakta tekrar hatırlatma düğmeyle ve yazarak seçilir', async () => {
   await t.hook(message('yarım saat arayla 2 kez'));
   assert.match(lastSent(t).body.text, /30 dk'da bir · 2 kez/);
   await press(t, btn(lastSent(t), 'Ekle'));
-  const sync = await (await t.call('/api/sync', { auth, body: { cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
   assert.deepEqual(sync.events[0].item.nag, { every: 30, times: 2 });
+});
+
+// ---------- 5.7: alarm zinciri sahte saatle, hub'ın kurduğu alarmlarla yürür ----------
+const TZ = 'Europe/Istanbul';
+const ist = (day, time) => zonedMs(day, time, TZ);
+async function world(day, time, items = []) {
+  const t = setup();
+  at(ist(day, time));
+  const auth = await linked(t);
+  let cursor = 0, local = items.map(i => cleanItem({ repeat: 'none', weekdays: [], status: 'pending', exceptions: {}, ...i }));
+  const w = { t, auth, log: [] };
+  w.sync = async (change = x => x) => {
+    for (let i = 0; i < 4; i++) {
+      const r = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor, items: local, prefs: { timeZone: TZ } } })).json();
+      assert.equal(r.error, undefined, r.error);
+      if (!r.events) { cursor = r.cursor; break; }
+      const s = { items: local, notes: [] };
+      for (const e of r.events) applyEvent(s, e);
+      local = s.items; cursor = r.cursor;
+    }
+    const next = change(local);
+    if (next !== local) { local = next; return w.sync(); }
+    return local;
+  };
+  await w.sync();
+  w.hub = t.hubs.get('chat:42');
+  const sends = () => t.calls.filter(c => c.method === 'sendMessage');
+  // Alarm zinciri: kurulan alarm ne zamansa o an çalışır (schedule() da sınanır)
+  w.run = async (toDay, toTime) => {
+    const end = ist(toDay, toTime);
+    for (let n = 0; w.hub.store.alarm && w.hub.store.alarm <= end; n++) {
+      assert.ok(n < 4000, 'alarm döngüye girmedi');
+      at(w.hub.store.alarm);
+      const before = sends().length;
+      await w.hub.alarm();
+      for (const c of sends().slice(before)) w.log.push({ at: `${dayAt(Date.now(), TZ)} ${hmAt(Date.now(), TZ)}`, text: c.body.text, id: c.id, body: c.body });
+    }
+    at(end);
+  };
+  w.last = () => w.log.at(-1);
+  w.times = () => w.log.map(x => x.at);
+  w.say = (text, extra) => t.hook(message(text, extra));
+  w.drafts = () => sends().filter(c => /<b>Taslak/.test(c.body.text)).length;
+  w.card = () => t.calls.filter(c => c.method === 'editMessageText').at(-1)?.body;
+  return w;
+}
+const timed = (name, fn) => test(name, async () => { try { await fn(); } finally { Date.now = realNow; } });
+const fish = (x = {}) => ({ id: 'p1', title: 'Balıkları besle', date: '2026-11-22', time: '20:10', reminders: [0], ...x });
+
+timed('erteleme basılan andan sayılır, tekrarlar da o andan yürür', async () => {
+  const w = await world('2026-11-22', '19:00', [fish({ nag: { every: 10, times: 3 } })]);
+  await w.run('2026-11-22', '20:15');
+  await press(w.t, btn(w.last(), 'Ertele'), w.last().id);
+  assert.match(w.card().text, /sohbete yaz/);
+  const labels = w.card().reply_markup.inline_keyboard.flat().map(b => b.text);
+  assert.deepEqual(labels, ['10 dk', '20 dk', '30 dk', '1 saat', '2 saat', 'Yarın', '← Geri'], 'elle gir düğmesi yok');
+  await press(w.t, 'z:p1:2026-11-22:20', w.last().id);
+  assert.match(w.card().text, /Ertelendi: 20:35/);
+  await w.run('2026-11-22', '23:00');
+  assert.deepEqual(w.times(), ['10', '35', '45', '55'].map(m => `2026-11-22 20:${m}`).concat('2026-11-22 21:05'));
+  assert.ok(w.log.slice(1).every(x => x.text === '🐾 <b>Balıkları besle</b>\n20:35'), 'mesajda yeni saat yazar');
+  const item = (await w.sync())[0];
+  assert.equal(item.snooze.until, ist('2026-11-22', '20:35'));
+});
+
+timed('menüde beklerken geçen süre de sayılır: an, düğmeye basılan andır', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  await press(w.t, btn(w.last(), 'Ertele'), w.last().id);
+  await w.run('2026-11-22', '20:22');
+  await press(w.t, 'z:p1:2026-11-22:10', w.last().id);
+  await w.run('2026-11-22', '23:00');
+  assert.equal(w.last().at, '2026-11-22 20:32');
+});
+
+timed('Ertele açıkken sohbete yazılan süre plan olmaz', async () => {
+  for (const [typed, expected] of [['15', '22 20:30'], ['42 dakika', '22 20:57'], ['1G', '23 20:15'], ['1 gün 5 dakika', '23 20:20'], ['1 gün ve 5 saat', '24 01:15'], ['21:30', '22 21:30'], ['2130', '22 21:30'], ['yarın 9\'da', '23 09:00'], ['bir buçuk saat sonra ertele', '22 21:45']]) {
+    const w = await world('2026-11-22', '19:00', [fish()]);
+    await w.run('2026-11-22', '20:15');
+    await press(w.t, btn(w.last(), 'Ertele'), w.last().id);
+    await w.say(typed);
+    assert.equal(w.drafts(), 0, typed);
+    await w.run('2026-11-25', '00:00');
+    assert.equal(w.last().at, '2026-11-' + expected, typed);
+  }
+});
+
+timed('Ertele\'ye basmadan da süre yazılır; yanıtlanan hatırlatma ertelenir', async () => {
+  const w = await world('2026-11-22', '19:00', [fish(), fish({ id: 'p2', title: 'Fatura öde', time: '20:12' })]);
+  await w.run('2026-11-22', '20:15');
+  const [first] = w.log;
+  await w.say('30 dakika');
+  assert.equal(w.hub.s.cal.items[1].snooze.until, ist('2026-11-22', '20:45'), 'son hatırlatma');
+  await w.say('5', { reply_to_message: { message_id: first.id } });
+  assert.equal(w.hub.s.cal.items[0].snooze.until, ist('2026-11-22', '20:20'), 'yanıtlanan hatırlatma');
+  assert.equal(w.drafts(), 0);
+});
+
+timed('anlamsız süre sorulur, açıkça yeni plan yazılırsa plan olur', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  await press(w.t, btn(w.last(), 'Ertele'), w.last().id);
+  await w.say('anlamsız');
+  const asked = lastSent(w.t);
+  assert.match(asked.body.text, /Süreyi anlayamadım/);
+  await w.say('20 dakika');
+  assert.ok(deleted(w.t).includes(asked.id), 'uyarı temizlenir');
+  await press(w.t, btn({ body: w.card() }, 'Değiştir'), w.last().id);
+  await w.say('yarın markete git');
+  assert.equal(w.drafts(), 1);
+  assert.equal(w.hub.s.snoozeAwait, null);
+});
+
+timed('hatırlatma yokken çıplak süre plan yapılmaz, yol gösterilir', async () => {
+  const w = await world('2026-11-22', '19:00');
+  await w.say('15 dakika');
+  assert.equal(w.drafts(), 0);
+  assert.match(lastSent(w.t).body.text, /Ertelenecek bir hatırlatma yok/);
+});
+
+timed('erken hatırlatmayı ertelemek plan saatini yutmaz, çift de çalmaz', async () => {
+  let w = await world('2026-11-22', '19:00', [fish({ reminders: [10, 0] })]);
+  await w.run('2026-11-22', '20:01');
+  await w.say('5 dk');
+  await w.run('2026-11-22', '21:00');
+  assert.deepEqual(w.times(), ['2026-11-22 20:00', '2026-11-22 20:06', '2026-11-22 20:10']);
+  assert.equal(w.log[1].text, '🐾 <b>Balıkları besle</b>\n20:10', 'plan saati değişmedi');
+  w = await world('2026-11-22', '19:00', [fish({ reminders: [10, 0] })]);
+  await w.run('2026-11-22', '20:00');
+  await w.say('10 dk');
+  await w.run('2026-11-22', '21:00');
+  assert.deepEqual(w.times(), ['2026-11-22 20:00', '2026-11-22 20:10']);
+});
+
+timed('uygulamadan erteleme Telegram kartına ve alarma yansır', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  await w.sync(list => list.map(i => patchOccurrence(i, i.date, { snooze: makeSnooze(i, Date.now() + 42 * 60000, Date.now()) })));
+  assert.match(w.card().text, /Ertelendi: 20:57/);
+  await w.run('2026-11-22', '23:00');
+  assert.deepEqual(w.times(), ['2026-11-22 20:10', '2026-11-22 20:57']);
+});
+
+timed('tekrarlayan planda yalnız o gün ertelenir', async () => {
+  const w = await world('2026-11-22', '19:00', [fish({ repeat: 'daily' })]);
+  await w.run('2026-11-22', '20:15');
+  await w.say('1 saat');
+  await w.run('2026-11-23', '23:00');
+  assert.deepEqual(w.times(), ['2026-11-22 20:10', '2026-11-22 21:15', '2026-11-23 20:10']);
+});
+
+timed('ertelenip tamamlanan plan susar', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  await w.say('1 saat');
+  await press(w.t, 'd:p1:2026-11-22', w.last().id);
+  await w.run('2026-11-23', '23:00');
+  assert.equal(w.log.length, 1);
+});
+
+timed('nişan: 1 ay ve 1 hafta önce, saatsiz planda da gelir', async () => {
+  const w = await world('2026-11-22', '19:00');
+  await w.t.call('/api/quick', { auth: w.auth, body: { text: "24 Nisan'da arkadaşımın nişanı var. Bana bunu bir ay önce hatırlat. Bir de bir hafta önce hatırlat" } });
+  await w.sync();
+  await w.run('2027-05-01', '00:00');
+  assert.deepEqual(w.times(), ['2027-03-24 09:00', '2027-04-17 09:00']);
+  assert.match(w.log[0].text, /^🎂 <b>Arkadaşımın nişanı<\/b>\n24 Nisan Cumartesi/);
+});
+
+timed('28 gün ve 1 yıl önce de gelir', async () => {
+  const w = await world('2026-11-22', '19:00', [fish({ id: 'u', date: '2028-03-15', time: '14:00', reminders: ['M12', 40320] })]);
+  await w.run('2028-03-16', '00:00');
+  assert.deepEqual(w.times(), ['2027-03-15 14:00', '2028-02-16 14:00']);
+});
+
+timed('fatura: aralıkta her gün, bitince 3 gün sonra, ödenince susar, sonraki ay yeniden', async () => {
+  const w = await world('2026-11-22', '19:00');
+  await w.t.call('/api/quick', { auth: w.auth, body: { text: "Elektrik faturası her ayın 10'u ile 15'i arası" } });
+  await w.sync();
+  await w.run('2026-12-31', '23:00');
+  assert.deepEqual(w.times(), [10, 11, 12, 13, 14, 15, 18].map(d => `2026-12-${d} 09:00`), 'ödenmezse');
+  assert.equal(w.last().text, '💡 <b>Elektrik faturası</b>\n10–15 Aralık');
+  w.log.length = 0;
+  await w.run('2027-01-12', '10:00');
+  assert.deepEqual(w.times(), [10, 11, 12].map(d => `2027-01-${d} 09:00`));
+  assert.ok(btn(w.last(), 'Ödedim'));
+  await press(w.t, btn(w.last(), 'Ödedim'), w.last().id);
+  assert.equal((await w.sync())[0].exceptions['2027-01-01'].doneOn, '2027-01-12');
+  await w.run('2027-02-09', '23:00');
+  assert.equal(w.log.length, 3, 'ödenince ek hatırlatma da gelmez');
+  await w.run('2027-02-10', '10:00');
+  assert.equal(w.last().at, '2027-02-10 09:00', 'sonraki dönem yeniden başlar');
+});
+
+timed('uygulamada erken ödenen fatura o dönem hiç hatırlatmaz', async () => {
+  const bill = { id: 'b', title: 'Su faturası', date: '2026-12-10', repeat: 'monthly', bill: { type: 'su', from: 10, to: 15, before: [], after: [3] } };
+  const w = await world('2026-11-22', '19:00', [bill]);
+  await w.sync(list => list.map(i => patchOccurrence(i, '2026-12-01', donePatch(i, 'done', '2026-11-22'))));
+  await w.run('2026-12-31', '23:00');
+  assert.equal(w.log.length, 0);
+});
+
+timed('fatura ertelenince o ana kadar susar, sonra günlük düzen sürer', async () => {
+  const bill = { id: 'b', title: 'Doğalgaz faturası', date: '2026-12-10', repeat: 'monthly', bill: { type: 'dogalgaz', from: 10, to: 15, before: [], after: [3] } };
+  const w = await world('2026-12-09', '19:00', [bill]);
+  await w.run('2026-12-10', '10:00');
+  await w.say('2 gün');
+  await w.run('2026-12-31', '23:00');
+  assert.deepEqual(w.times(), ['10 09:00', '12 10:00', '13 09:00', '14 09:00', '15 09:00', '18 09:00'].map(x => '2026-12-' + x));
+});
+
+timed('otomatik çekim: bir gün önce ve o gün', async () => {
+  const w = await world('2026-11-22', '19:00');
+  await w.t.call('/api/quick', { auth: w.auth, body: { text: "Claude faturası her ayın 8'inde çekiliyor" } });
+  await w.sync();
+  await w.run('2026-12-31', '23:00');
+  assert.deepEqual(w.times(), ['2026-12-07 09:00', '2026-12-08 09:00']);
+  assert.ok(btn(w.last(), 'Çekildi'));
+});
+
+timed('kısayola "20 dakika ertele" denince plan eklenmez', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  const res = await (await w.t.call('/api/quick', { auth: w.auth, body: { text: '20 dakika ertele' } })).text();
+  assert.match(res, /Ertelendi: 20:35/);
+  assert.equal((await w.sync()).length, 1);
+});
+
+timed('5.6\'dan bekleyen erteleme kaybolmaz', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  await w.hub.store.put('snooze', [{ id: 'old', itemId: 'p1', origin: '2026-11-22', title: 'Balıkları besle', time: '20:10', due: ist('2026-11-22', '21:40') }]);
+  w.hub.s = null;
+  await w.hub.load();
+  await w.hub.schedule();
+  await w.run('2026-11-22', '23:00');
+  assert.equal(w.last().at, '2026-11-22 21:40');
+});
+
+timed('eski sürüm uygulama yeni alanları silemez', async () => {
+  const bill = { id: 'b', title: 'Kira', date: '2026-12-01', repeat: 'monthly', bill: { type: 'kira', from: 1, to: 1 } };
+  const w = await world('2026-11-22', '19:00', [bill]);
+  const r = await (await w.t.call('/api/sync', { auth: w.auth, body: { cursor: w.hub.s.seq, items: [{ ...bill, bill: undefined }], prefs: {} } })).json();
+  assert.match(r.error, /kapatıp yeniden aç/);
+  assert.ok(w.hub.s.cal.items[0].bill);
+});
+
+timed('hatırlatma geldikten sonra tekrarlıya çevrilen plan bozulmaz', async () => {
+  const w = await world('2026-11-22', '19:00', [fish()]);
+  await w.run('2026-11-22', '20:15');
+  await w.sync(list => list.map(i => cleanItem({ ...i, repeat: 'daily' })));
+  await w.say('15 dakika');
+  assert.ok(w.hub.s.cal.items.every(i => !('' in i.exceptions)), 'boş günlü istisna yazılmaz');
+  assert.equal((await w.sync()).length, 1);
 });

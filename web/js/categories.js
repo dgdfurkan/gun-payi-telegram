@@ -1,3 +1,5 @@
+import { BILL_TYPES } from './bills.js';
+
 // Plan başlığından ikon/kategori tahmini. Hem uygulama (ikon) hem bot (emoji) kullanır.
 // "=" ile başlayan sözcük tam eşleşir ("ara" ≠ "araba"); diğerleri kök olarak ek alabilir.
 export const CATS = {
@@ -21,10 +23,16 @@ export const CATS = {
   fun: { label: 'Eğlence', color: '#bf5af2', emoji: '🎬', glyph: 'film', words: ['film', 'dizi', 'sinema', 'tiyatro', 'konser', 'maç'] },
   pet: { label: 'Evcil', color: '#a2845e', emoji: '🐾', glyph: 'paw', words: ['köpek', 'kedi', 'mama', 'veteriner', 'balık', 'akvaryum'] },
   plant: { label: 'Bitki', color: '#30d158', emoji: '🌱', glyph: 'leaf', words: ['çiçek', 'bitki', 'sula', 'fide', 'bahçe'] },
+  power: { label: 'Elektrik', color: '#f5a300', emoji: '💡', glyph: 'bolt', words: [] },
+  flame: { label: 'Isınma', color: '#ff6b35', emoji: '🔥', glyph: 'flame', words: [] },
+  wifi: { label: 'İnternet', color: '#0a84ff', emoji: '🌐', glyph: 'wifi', words: [] },
+  mobile: { label: 'Hat', color: '#34c759', emoji: '📱', glyph: 'mobile', words: [] },
+  home: { label: 'Ev', color: '#a2845e', emoji: '🏠', glyph: 'home', words: [] },
+  sub: { label: 'Abonelik', color: '#8e5cf7', emoji: '🔄', glyph: 'sub', words: [] },
   gift: { label: 'Hediye', color: '#ff2d55', emoji: '🎁', glyph: 'gift', words: ['hediye'] },
 };
 const B = '(?<![\\p{L}])';
-const compiled = Object.entries(CATS).map(([key, c]) => [key, new RegExp(B + '(?:' + c.words.map(w => (w.startsWith('=') ? w.slice(1) + '(?![\\p{L}])' : w)).join('|') + ')', 'iu')]);
+const compiled = Object.entries(CATS).filter(([, c]) => c.words.length).map(([key, c]) => [key, new RegExp(B + '(?:' + c.words.map(w => (w.startsWith('=') ? w.slice(1) + '(?![\\p{L}])' : w)).join('|') + ')', 'iu')]);
 const SHOP_TAIL = /(?<![\p{L}])al(?![\p{L}])\s*$/u; // "ekmek al", "süt al"
 
 export function detectCat(title = '') {
@@ -33,5 +41,5 @@ export function detectCat(title = '') {
   if (SHOP_TAIL.test(s)) return 'shop';
   return '';
 }
-export const catOf = item => (item?.icon && CATS[item.icon] ? item.icon : detectCat(item?.title));
+export const catOf = item => (item?.icon && CATS[item.icon] ? item.icon : item?.bill ? BILL_TYPES[item.bill.type]?.cat || 'pay' : detectCat(item?.title));
 export const emojiOf = item => CATS[catOf(item)]?.emoji || (item?.time ? '⏰' : '•');

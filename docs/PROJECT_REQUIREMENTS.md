@@ -1,13 +1,13 @@
 # İstekler ve kapsam
 
-Güncellik: **18 Kasım 2026**. Son istek, eski briefteki çelişen tercihin önüne geçer. Eski istek ve kararların kaydı `docs/history/` altındadır.
+Güncellik: **22 Kasım 2026**. Son istek, eski briefteki çelişen tercihin önüne geçer. Eski istek ve kararların kaydı `docs/history/` altındadır.
 
 ## Çekirdek
 
 | İstek | Karşılık |
 | --- | --- |
 | Sade, şık, modern; az düğmeyle çok iş | 4 sekme + ortada ekle. Tek ekleme alanı her şeyi anlar. |
-| iPhone SE 2'de PWA, gerçek uygulama hissi | iOS sistem fontu ve ölçüleri, büyük başlık, bulanık sekme çubuğu, kart modal, sürükle-kapat, titreşim, dokunma tepkileri, açılış ekranı, açık/koyu tema. 375×667 denendi. |
+| iPhone SE 2'de PWA, gerçek uygulama hissi | iOS sistem fontu ve ölçüleri, büyük başlık, bulanık sekme çubuğu, kart modal, sürükle-kapat, titreşim, dokunma tepkileri, tek açılış (ikinci yükleme ekranı yok), açık/koyu tema. 375×667 denendi. |
 | Gün planlama, gün akışı, yapılacaklar | Gün görünümü (hafta şeridi + zaman sıralı liste + Yapılacaklar), Hafta, Ay. |
 | Düzenli haftalık işler | Günlük, hafta içi, hafta sonu, seçili günler, aylık tekrar. Tek günü atla/taşı. |
 | Notlar, ay takvimi, haftalık değerlendirme | Kaldı. Gelişim hedefleri kaldırıldı (kullanıcı kararı). |
@@ -32,3 +32,13 @@ Güncellik: **18 Kasım 2026**. Son istek, eski briefteki çelişen tercihin ön
 | Token/ID ile uğraşmadan bağlansın (JetBarcode gibi) | Varsayılan bot; "Telegram'a bağlan" → Başlat. |
 | Widget, şarj yemeden | iOS Kısayollar widget'ı → `/api/quick`. Uygulama açılmaz. |
 | Telegram'dan ekleme | Yazı ve sesli mesaj; komutlar; hatırlatmada Tamamlandı/Ertele. |
+
+## Hatırlatma ve faturalar (22 Kasım)
+
+| İstek | Karşılık |
+| --- | --- |
+| Erteleme, bastığım andan sayılsın | Süre, sonraki tekrarlar ve mesajdaki saat o andan. |
+| Süreyi "elle gir" düğmesi olmadan yazayım | Telegram'da doğrudan sohbete, uygulamada hazır sürelerin altındaki alana. |
+| Sınırlar kalksın (1 ay, 1 hafta, 28 gün önce) | Her sayı ve birim yazılabilir; saatsiz planda da çalışır. |
+| Faturalar: 10-15 arası her gün, ödeyince sus, sonraki ay yine, 15'inden 3 gün sonra bir daha | Faturalar ekranı, "Ödedim", bitişten sonra ek hatırlatma. |
+| Çift açılış ekranı olmasın | Uygulamanın yükleme animasyonu kaldırıldı. |

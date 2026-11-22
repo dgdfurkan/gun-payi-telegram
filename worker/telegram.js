@@ -1,7 +1,6 @@
 // Telegram Bot API yardımcıları ve mesaj biçimleri.
-import { dayAt, dayAdd, itemsOn, summary, repeatLabel, remindersLabel, dayLabel, DAY_NAMES, DAY_SHORT, shortDate, weekday } from '../web/js/core.js';
+import { dayAt, dayAdd, planOn, summary, repeatLabel, remindersLabel, nagShort, dayLabel, exactDay, whenAt, spanLabel, billRemindLabel, billSpan, monthKey, paidWord, DAY_NAMES, DAY_SHORT, shortDate, weekday, ALL_DAY } from '../web/js/core.js';
 import { emojiOf } from '../web/js/categories.js';
-import { nagShort } from '../web/js/core.js';
 import { nagLabel } from '../web/js/parse.js';
 
 export const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -27,45 +26,62 @@ export const HELP = [
   '• <i>Her cuma 12\'de babaannemi ara</i>',
   '• <i>Yarın 9\'da spor, 10 dk önce hatırlat</i>',
   '• <i>Hafta içi her gün 07:30 ilaç</i>',
-  '• <i>not: aklımdaki fikir</i>',
+  '• <i>24 Nisan\'da nişan, 1 ay ve 1 hafta önce hatırlat</i>',
+  '• <i>Elektrik faturası her ayın 10\'u ile 15\'i arası</i>',
+  '• <i>Not aklımdaki fikir</i>',
+  '• Hatırlatmayı ertelemek için süreyi yaz: <i>20 dk</i>, <i>1 gün 5 saat</i>.',
   '• Saatsiz yazarsan yapılacaklara eklerim.',
   '• Taslak açıkken <i>yarın 10\'da</i> yazarsan taslağı düzeltirim.',
   '',
   '/bugun · /yarin · /hafta',
 ].join('\n');
 
-// Sade hatırlatma: ne yapılacak ve saati. Kaçıncı hatırlatma ya da "10 dk sonra" yazmaz.
+// Sade hatırlatma: ne yapılacak ve ne zaman. Kaçıncı hatırlatma ya da "10 dk sonra" yazmaz.
+// Saati geçtikten sonra ertelenen planda saat, ertelenen saattir (job.date/time öyle gelir).
 export function reminderMessage(job, today) {
   const icon = emojiOf(job) === '•' ? '⏰' : emojiOf(job);
-  const day = job.date && today && job.date !== today ? dayLabel(job.date, today) + ' ' : '';
-  return `${icon} <b>${esc(job.title)}</b>${job.time ? `\n${day}${job.time}` : ''}`;
+  const when = job.bill
+    ? spanLabel(job.date, job.end || job.date)
+    : [job.date && !(job.time && job.date === today) ? exactDay(job.date, today) : '', job.time].filter(Boolean).join(' ');
+  return `${icon} <b>${esc(job.title)}</b>${when ? `\n${when}` : ''}`;
 }
-// Hatırlatma altındaki düğmeler: ana sıra ya da Ertele menüsü
-export function reminderButtons(itemId, origin, mode = 'main') {
+export const snoozedMessage = (job, until, today, tz) => `${reminderMessage(job, today)}\n⏰ Ertelendi: ${whenAt(until, tz, today)}`;
+export const snoozeMenuMessage = (job, today) => `${reminderMessage(job, today)}\n\n<i>Süreye dokun ya da sohbete yaz: 45 dk, 3 saat, 1 gün</i>`;
+
+// Hatırlatma altındaki düğmeler: ana sıra, Ertele menüsü ya da ertelenmiş hâl
+export function reminderButtons(itemId, origin, { mode = 'main', bill = null } = {}) {
   const k = `${itemId}:${origin}`;
   if (mode === 'snooze') return buttons([
     [['10 dk', `z:${k}:10`], ['20 dk', `z:${k}:20`], ['30 dk', `z:${k}:30`]],
     [['1 saat', `z:${k}:60`], ['2 saat', `z:${k}:120`], ['Yarın', `z:${k}:1440`]],
-    [['✏️ Süre yaz', `w:${k}`], ['← Geri', `b:${k}`]],
+    [['← Geri', `b:${k}`]],
   ]);
-  return buttons([[['✓ Tamamlandı', `d:${k}`], ['⏰ Ertele', `e:${k}`]]]);
+  return buttons([[[`✓ ${bill ? paidWord(bill) : 'Tamamlandı'}`, `d:${k}`], [mode === 'snoozed' ? '⏰ Değiştir' : '⏰ Ertele', `e:${k}`]]]);
 }
 
-export function addedMessage(item, today, viaAi) {
+const effectiveRem = (item, defaults) => item.reminders ?? (item.time ? defaults : []);
+
+export function addedMessage(item, today, viaAi, { reminderDefaults = [10], allDayTime = ALL_DAY } = {}) {
   const lines = [`✅ ${emojiOf(item)} <b>${esc(item.title)}</b>`];
-  const when = item.repeat !== 'none' ? repeatLabel(item) : item.date ? dayLabel(item.date, today) : 'Yapılacaklar';
-  lines.push([when, item.time ? (item.endTime ? `${item.time}–${item.endTime}` : item.time) : ''].filter(Boolean).join(' · '));
-  const extra = [item.time && item.reminders?.length ? '🔔 ' + remindersLabel(item.reminders) : '', item.time && item.nag ? '🔁 ' + nagShort(item.nag) : ''].filter(Boolean);
-  if (extra.length) lines.push(extra.join(' · '));
+  if (item.bill) {
+    const { start, end } = billSpan(item.bill, monthKey(item.date));
+    lines.push(`${repeatLabel(item)} · ilk dönem ${spanLabel(start, end)}`, `🔔 ${billRemindLabel(item.bill)} · ${item.time || allDayTime}`);
+  } else {
+    const when = item.repeat !== 'none' ? repeatLabel(item) : item.date ? dayLabel(item.date, today) : 'Yapılacaklar';
+    lines.push([when, item.time ? (item.endTime ? `${item.time}–${item.endTime}` : item.time) : ''].filter(Boolean).join(' · '));
+    const rem = item.date ? effectiveRem(item, reminderDefaults) : [];
+    const extra = [rem.length ? `🔔 ${remindersLabel(rem, !item.time)}${item.time ? '' : ` (${allDayTime})`}` : '', item.date && item.nag ? '🔁 ' + nagShort(item.nag) : ''].filter(Boolean);
+    if (extra.length) lines.push(extra.join(' · '));
+  }
   if (viaAi) lines.push('<i>✨ AI ile anlaşıldı, kontrol et</i>');
   return lines.join('\n');
 }
 
-export function dayList(items, day, today, offset = 0) {
-  const list = itemsOn(items, day);
+export function dayList(items, day, today, offset = 0, prefs = undefined) {
+  const list = planOn(items, day, today, prefs);
   const head = `<b>${esc(dayLabel(day, today))}</b> · ${shortDate(day)} ${DAY_NAMES[weekday(day)]}`;
   if (!list.length) return { text: `${head}\nBoş.`, list };
-  const rows = list.map((o, i) => `${o.status === 'done' ? '✓' : `${offset + i + 1}.`} ${o.time ? o.time + ' ' : ''}${o.status === 'done' ? '<s>' + esc(o.title) + '</s>' : esc(o.title)}`);
+  const rows = list.map((o, i) => `${o.status === 'done' ? '✓' : `${offset + i + 1}.`} ${o.at?.time || o.time ? (o.at?.time || o.time) + ' ' : ''}${o.status === 'done' ? '<s>' + esc(o.title) + '</s>' : esc(o.title) + (o.bill ? ` (${spanLabel(o.date, o.end)})` : '')}`);
   return { text: `${head}\n${rows.join('\n')}`, list };
 }
 
@@ -77,27 +93,34 @@ export function inboxList(items) {
 
 export function digestMessage(items, prefs, now) {
   const tz = prefs.timeZone, today = dayAt(now, tz);
-  const list = itemsOn(items, today).filter(o => o.status !== 'done');
+  const list = planOn(items, today, today, prefs).filter(o => o.status !== 'done');
   const hi = prefs.name ? `Günaydın ${esc(prefs.name)} ☀️` : 'Günaydın ☀️';
   if (!list.length) return `${hi}\nBugün planında bir şey yok.`;
-  return `${hi}\n<b>Bugün</b>\n` + list.map(o => `• ${o.time ? o.time + ' ' : ''}${esc(o.title)}`).join('\n');
+  return `${hi}\n<b>Bugün</b>\n` + list.map(o => `• ${o.at?.time || o.time ? (o.at?.time || o.time) + ' ' : ''}${esc(o.title)}${o.bill ? ` (${spanLabel(o.date, o.end)})` : ''}`).join('\n');
 }
 
 export { summary, dayAdd };
 
 // Düğmeli taslak: main | day | time | rem | rep
-const REM_OPTS = [[0, 'Vaktinde'], [1, '1 dk'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 sa'], [1440, '1 gün']];
-export function draftView(d, today, mode = 'main', defaults = [10]) {
+const REM_OPTS = [[0, 'Vaktinde'], [1, '1 dk'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 sa'], [120, '2 sa'], [1440, '1 gün'], [4320, '3 gün'], [10080, '1 hafta'], ['M1', '1 ay']];
+const DAY_OPTS = [[0, 'Aynı gün'], [1440, '1 gün'], [4320, '3 gün'], [10080, '1 hafta'], [20160, '2 hafta'], ['M1', '1 ay'], ['M2', '2 ay'], ['M12', '1 yıl']];
+export function draftView(d, today, mode = 'main', { reminderDefaults = [10], allDayTime = ALL_DAY } = {}) {
   const it = d.item, x = (op, arg = '') => `x:${d.id}:${op}${arg !== '' ? ':' + arg : ''}`;
   const when = it.repeat !== 'none' ? repeatLabel(it) : it.date ? `${dayLabel(it.date, today)}${dayLabel(it.date, today).match(/^(Bugün|Yarın|Dün)$/) ? ', ' + shortDate(it.date) : ''}` : 'Tarihsiz (Yapılacaklar)';
-  const rem = it.reminders ?? defaults;
+  const rem = effectiveRem(it, reminderDefaults);
   const lines = [];
   if (d.voice) lines.push(`🎙 <i>“${esc(d.voice)}”</i>`, '');
-  lines.push(`📝 <b>Taslak</b>`, `${emojiOf(it)} <b>${esc(it.title)}</b>`, `📅 ${esc(when)}`, `🕐 ${it.time ? (it.endTime ? `${it.time}–${it.endTime}` : it.time) : 'Saat yok'}`);
-  if (it.time) lines.push(`🔔 ${esc(remindersLabel(rem))}`);
-  if (it.time && it.nag) lines.push(`🔁 Tamamlanmazsa ${esc(nagLabel(it.nag))}`);
+  lines.push(`📝 <b>Taslak</b>`, `${emojiOf(it)} <b>${esc(it.title)}</b>`);
+  if (it.bill) {
+    const { start, end } = billSpan(it.bill, monthKey(it.date));
+    lines.push(`📅 ${esc(repeatLabel(it))}`, `İlk dönem: ${spanLabel(start, end)}`, `🕐 ${it.time || allDayTime}`, `🔔 ${esc(billRemindLabel(it.bill))}`);
+  } else {
+    lines.push(`📅 ${esc(when)}`, `🕐 ${it.time ? (it.endTime ? `${it.time}–${it.endTime}` : it.time) : 'Saat yok'}`);
+    if (it.date && (it.time || rem.length)) lines.push(`🔔 ${esc(remindersLabel(rem, !it.time))}${it.time ? '' : ` (${allDayTime})`}`);
+    if (it.date && it.nag) lines.push(`🔁 Tamamlanmazsa ${esc(nagLabel(it.nag))}`);
+  }
   if (d.ai) lines.push('<i>✨ AI ile anlaşıldı, kontrol et</i>');
-  const hint = { main: 'Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.', day: 'Ya da tarihi yaz: “20 Aralık”, “20 Aralık 2027”, “haftaya cuma”.', time: 'Ya da saati yaz: “17:34”.', rem: 'Ya da yaz: “30 dk”, “1 sa 15 dk”, “10 ve 15 dk”. Tekrar için: “10 dk içinde 5 kere”.', txt: '✏️ Yeni başlığı yazıp gönder.' }[mode];
+  const hint = { main: it.bill ? 'Saati ya da “1 gün önce”yi yazabilirsin.' : 'Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.', day: 'Ya da tarihi yaz: “20 Aralık”, “20 Aralık 2027”, “haftaya cuma”.', time: 'Ya da saati yaz: “17:34”.', rem: 'Ya da istediğin süreyi yaz: “30 dk”, “28 gün”, “1 ay ve 1 hafta”. Tekrar için: “10 dk içinde 5 kere”.', txt: '✏️ Yeni başlığı yazıp gönder.' }[mode];
   if (hint) lines.push('', `<i>${hint}</i>`);
   const back = ['← Geri', x('back')];
   let rows;
@@ -112,14 +135,18 @@ export function draftView(d, today, mode = 'main', defaults = [10]) {
   } else if (mode === 'rem') {
     const r = ([v, l]) => [(rem.includes(v) ? '✓ ' : '') + l, x('r', v)];
     const g = (every, times, l) => [((it.nag?.every === every && it.nag?.times === times) ? '✓ ' : '') + l, x('g', `${every}x${times}`)];
-    rows = [REM_OPTS.slice(0, 4).map(r), REM_OPTS.slice(4).map(r), [[rem.length ? 'Hatırlatma yok' : '✓ Hatırlatma yok', x('r', 'none')]],
+    const opts = it.time ? REM_OPTS : DAY_OPTS;
+    const grid = Array.from({ length: Math.ceil(opts.length / 4) }, (_, i) => opts.slice(i * 4, i * 4 + 4).map(r));
+    rows = [...grid, [[rem.length ? 'Hatırlatma yok' : '✓ Hatırlatma yok', x('r', 'none')]],
       [g(10, 3, '🔁 10dk×3'), g(10, 5, '🔁 10dk×5'), g(30, 2, '🔁 30dk×2'), [it.nag ? 'Tekrarsız' : '✓ Tekrarsız', x('g', 'none')]], [back]];
   } else if (mode === 'rep') {
     const cur = it.repeat === 'weekly' ? (it.weekdays.join() === '1,2,3,4,5' ? 'weekdays' : it.weekdays.join() === '6,0' ? 'weekend' : 'weekly') : it.repeat;
     const p = (v, l) => [(cur === v ? '✓ ' : '') + l, x('p', v)];
-    rows = [[p('none', 'Tekrar yok'), p('daily', 'Her gün')], [p('weekdays', 'Hafta içi'), p('weekend', 'Hafta sonu')], [p('weekly', 'Her hafta'), p('monthly', 'Her ay')], [back]];
+    rows = [[p('none', 'Tekrar yok'), p('daily', 'Her gün')], [p('weekdays', 'Hafta içi'), p('weekend', 'Hafta sonu')], [p('weekly', 'Her hafta'), p('monthly', 'Her ay'), p('yearly', 'Her yıl')], [back]];
   } else if (mode === 'txt') {
     rows = [[back]];
+  } else if (it.bill) {
+    rows = [[['✅ Ekle', x('ok')], ['✖️ Vazgeç', x('no')]], [['🕐 Saat', x('time')], ['✏️ Yazı', x('txt')]]];
   } else {
     rows = [[['✅ Ekle', x('ok')], ['✖️ Vazgeç', x('no')]], [['📅 Gün', x('day')], ['🕐 Saat', x('time')], ['🔔 Hatırlat', x('rem')]], [['🔁 Tekrar', x('rep')], ['✏️ Yazı', x('txt')]]];
   }

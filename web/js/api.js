@@ -55,18 +55,19 @@ export const pause = paused => call('pause', { body: { paused } });
 export const aiParse = (text, tz) => call('parse', { body: { text, now: Date.now(), tz } });
 
 // Senkron: önce bekleyen olayları uygula, sonra yerel planları aynala.
-let timer = null, running = null, last = 0, lastStatus = null;
+let timer = null, waiting = false, running = null, last = 0, lastStatus = null;
 export const lastSync = () => lastStatus;
 export function sync(now = false) {
   if (!link()) return Promise.resolve(null);
   clearTimeout(timer);
+  waiting = !now;
   if (!now) { timer = setTimeout(() => sync(true), 1500); return Promise.resolve(null); }
   if (running) return running.then(() => sync(true));
   running = (async () => {
     try {
       for (let i = 0; i < 6; i++) {
         const s = get();
-        const r = await call('sync', { body: { cursor: s.sync.cursor || 0, items: s.items, prefs: s.prefs } });
+        const r = await call('sync', { body: { proto: 2, cursor: s.sync.cursor || 0, items: s.items, prefs: s.prefs } });
         if (r.events?.length) {
           await commit(d => { for (const e of r.events) applyEvent(d, e); d.sync.cursor = r.cursor; });
           continue;
@@ -85,6 +86,8 @@ export function sync(now = false) {
   })();
   return running;
 }
+// Uygulama arka plana geçerken bekleyen değişikliği hemen gönder (iOS zamanlayıcıyı dondurur).
+export const flush = () => { if (waiting) sync(true); };
 // Uygulama öne gelince en fazla 20 saniyede bir.
 export function syncIfStale() {
   if (Date.now() - last > 20000) sync(true);

@@ -1,9 +1,9 @@
 // Uygulama içi seçiciler: takvim, saat çarkı, hatırlatma (saniyeye kadar özel), tekrar, ikon.
 // Yerel <input type=date/time> iOS'ta yeniden çizimde kendiliğinden kapandığı için kullanılmıyor.
-import { dayAdd, weekday, mondayOf, monthDays, daysBetween, pad, MONTHS, DAY_SHORT, remindersLabel } from './core.js';
+import { dayAdd, weekday, mondayOf, monthDays, daysBetween, pad, MONTHS, DAY_SHORT, remindersLabel, readRem, makeRem, sortRems, durationLabel, whenAt } from './core.js';
 import { CATS } from './categories.js';
 import { icon } from './icons.js';
-import { haptic } from './ui.js';
+import { haptic, esc, toast } from './ui.js';
 
 // ---------- Takvim ----------
 export function calendarHTML(sel, month, today) {
@@ -67,76 +67,136 @@ export function bindWheel(root, onChange) {
   });
 }
 
+// ---------- Sayı alanı ----------
+// Hazır seçenekler kısayoldur; her alana istenen sayı yazılabilir.
+const numInput = (attr, value, label) => `<input type="number" inputmode="numeric" min="1" value="${value}" ${attr} aria-label="${label}">`;
+const unitSeg = (units, cur) => `<span class="unit-seg">${units.map(u => `<button type="button" data-unit="${u}" aria-pressed="${u === cur}">${u}</button>`).join('')}</span>`;
+export function pressUnit(btn) {
+  const box = btn.closest('.rem-custom');
+  box.dataset.u = btn.dataset.unit;
+  box.querySelectorAll('[data-unit]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  haptic();
+}
+export function stepInput(input, dir, min = 1) {
+  const v = parseInt(input.value, 10) || min, step = v > 10 || (v === 10 && dir > 0) ? 5 : 1;
+  input.value = Math.max(min, v + dir * step);
+  haptic();
+}
+
 // ---------- Hatırlatma ----------
-export const REM_PRESETS = [[0, 'Vaktinde'], [1, '1 dk'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [120, '2 saat'], [1440, '1 gün']];
-const UNITS = { sn: 1 / 60, dk: 1, sa: 60, gün: 1440 };
-// Tamamlanmazsa tekrar hatırlat: aralık ve kaç kez
+const REM_PRESETS = [[0, 'Vaktinde'], [1, '1 dk'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 saat'], [120, '2 saat'], [1440, '1 gün'], [4320, '3 gün'], [10080, '1 hafta'], ['M1', '1 ay']];
+const DAY_PRESETS = [[0, 'Aynı gün'], [1440, '1 gün'], [4320, '3 gün'], [10080, '1 hafta'], [20160, '2 hafta'], ['M1', '1 ay'], ['M2', '2 ay'], ['M12', '1 yıl']];
+const UNITS = { sn: 1 / 60, dk: 1, sa: 60, gün: 1440, hafta: 10080, ay: 'M1', yıl: 'M12' };
+export function reminderHTML(list, { allDay = false, at = '' } = {}) {
+  const base = allDay ? DAY_PRESETS : REM_PRESETS, known = base.map(([v]) => v);
+  const extra = sortRems(list.filter(v => !known.includes(v))).reverse();
+  const chip = (v, l) => `<button type="button" class="chip ${list.includes(v) ? 'on' : ''}" data-rem="${v}">${l}</button>`;
+  const units = Object.keys(UNITS).filter(u => !allDay || !['sn', 'dk', 'sa'].includes(u));
+  const u = allDay ? 'gün' : 'dk';
+  return `${allDay && at ? `<p class="pk-note">Saatsiz planda hatırlatma saati ${at}. Ayarlar’dan değiştirebilirsin.</p>` : ''}
+    <div class="picker-row">${base.map(([v, l]) => chip(v, l)).join('')}${extra.map(v => chip(v, remindersLabel([v], allDay).replace(' önce', ''))).join('')}
+      <button type="button" class="chip ${list.length ? '' : 'on'}" data-rem="none">Yok</button></div>
+    <div class="rem-custom" data-u="${u}" data-custom="rem"><span class="rc-l">Özel</span>
+      <button type="button" class="rc-b" data-rc="-" aria-label="Azalt">${icon('minus')}</button>
+      ${numInput('data-rcv', allDay ? 28 : 20, 'Süre')}
+      <button type="button" class="rc-b" data-rc="+" aria-label="Artır">${icon('plus')}</button>
+      <button type="button" class="rc-add" data-rc="add">Ekle</button>
+      ${unitSeg(units, u)}</div>`;
+}
+function customValue(box) {
+  const n = parseInt(box.querySelector('[data-rcv]').value, 10), unit = UNITS[box.dataset.u];
+  if (!(n >= 1)) return null;
+  if (typeof unit === 'string') return n * +unit.slice(1) <= 120 ? makeRem(n * +unit.slice(1)) : null;
+  return readRem(n * unit);
+}
+// Özel satırdaki düğmeleri işler; eklenecek değer döner, yoksa null.
+export function handleCustom(btn) {
+  const box = btn.closest('.rem-custom');
+  if (btn.dataset.unit) { pressUnit(btn); return null; }
+  if (btn.dataset.rc !== 'add') { stepInput(box.querySelector('[data-rcv]'), btn.dataset.rc === '+' ? 1 : -1); return null; }
+  const v = customValue(box);
+  if (v === null) toast('Geçerli bir süre yaz.');
+  return v;
+}
+// Sayıyı yazıp "Ekle"ye basmadan kaydedene: yazdığı süre kaybolmasın.
+export function withTypedReminder(root, list) {
+  const box = root.querySelector('[data-custom="rem"]'), input = box?.querySelector('[data-rcv]');
+  if (!input || input.value === input.defaultValue) return null;
+  const v = customValue(box);
+  return v === null || list.includes(v) ? null : sortRems([...list, v]);
+}
+export function toggleReminder(list, value) {
+  if (value === 'none') return [];
+  const v = readRem(value);
+  return list.includes(v) ? list.filter(x => x !== v) : sortRems([...list, v]);
+}
+
+// ---------- Tamamlanmazsa tekrar ----------
 const NAG_EVERY = [[0, 'Kapalı'], [5, '5 dk'], [10, '10 dk'], [15, '15 dk'], [30, '30 dk'], [60, '1 sa']];
 const NAG_TIMES = [2, 3, 5, 10];
 export function nagHTML(nag) {
   const ev = nag?.every || 0, tm = nag?.times || 3;
   const chip = (attr, v, l, on) => `<button type="button" class="chip ${on ? 'on' : ''}" data-${attr}="${v}">${l}</button>`;
-  const evs = NAG_EVERY.some(([v]) => v === ev) ? NAG_EVERY : [...NAG_EVERY, [ev, ev % 60 ? ev + ' dk' : ev / 60 + ' sa']];
+  const evs = NAG_EVERY.some(([v]) => v === ev) ? NAG_EVERY : [...NAG_EVERY, [ev, durationLabel(ev)]];
   const tms = NAG_TIMES.includes(tm) ? NAG_TIMES : [...NAG_TIMES, tm].sort((a, b) => a - b);
+  const u = ev && ev % 1440 === 0 ? 'gün' : ev && ev % 60 === 0 ? 'sa' : 'dk';
   return `<div class="pk-sub nag-h">${icon('again')}Tamamlanmazsa tekrar hatırlat</div>
     <div class="picker-row">${evs.map(([v, l]) => chip('nag-every', v, l, ev === v)).join('')}</div>
-    ${ev ? `<div class="picker-row">${tms.map(n => chip('nag-times', n, n + ' kez', tm === n)).join('')}</div>` : ''}`;
+    ${ev ? `<div class="picker-row">${tms.map(n => chip('nag-times', n, n + ' kez', tm === n)).join('')}</div>
+    <div class="rem-custom" data-u="${u}"><span class="rc-l">Özel</span>
+      ${numInput('data-nag-n', ev / UNITS[u], 'Kaçta bir')}<span class="rc-l">×</span>${numInput('data-nag-t', tm, 'Kaç kez')}
+      <button type="button" class="rc-add" data-nag-set>Uygula</button>${unitSeg(['dk', 'sa', 'gün'], u)}</div>` : ''}`;
 }
 export function applyNag(nag, btn) {
   if ('nagEvery' in btn.dataset) { const e = +btn.dataset.nagEvery; return e ? { every: e, times: nag?.times || 3 } : null; }
   if ('nagTimes' in btn.dataset && nag) return { ...nag, times: +btn.dataset.nagTimes };
+  if ('nagSet' in btn.dataset) {
+    const box = btn.closest('.rem-custom');
+    const every = parseInt(box.querySelector('[data-nag-n]').value, 10) * UNITS[box.dataset.u], times = parseInt(box.querySelector('[data-nag-t]').value, 10);
+    if (every >= 1 && every <= 525600 && times >= 1 && times <= 1000) return { every, times };
+    toast('En fazla 1 yılda bir, 1000 kez olabilir.');
+  }
   return nag || null;
 }
-export function reminderHTML(list) {
-  const presets = REM_PRESETS.map(([v]) => v);
-  const extra = list.filter(v => !presets.includes(v)).sort((a, b) => a - b);
-  const chip = (v, l) => `<button type="button" class="chip ${list.includes(v) ? 'on' : ''}" data-rem="${v}">${l}</button>`;
-  return `<div class="picker-row">${REM_PRESETS.map(([v, l]) => chip(v, l)).join('')}${extra.map(v => chip(v, remindersLabel([v]).replace(' önce', ''))).join('')}
-      <button type="button" class="chip ${list.length ? '' : 'on'}" data-rem="none">Yok</button></div>
-    <div class="rem-custom" data-u="dk"><span class="rc-l">Özel</span>
-      <button type="button" class="rc-b" data-rc="-" aria-label="Azalt">${icon('minus')}</button>
-      <input type="number" inputmode="numeric" min="1" max="999" value="20" data-rcv aria-label="Süre">
-      <button type="button" class="rc-b" data-rc="+" aria-label="Artır">${icon('plus')}</button>
-      <span class="unit-seg">${Object.keys(UNITS).map(u => `<button type="button" data-unit="${u}" aria-pressed="${u === 'dk'}">${u}</button>`).join('')}</span>
-      <button type="button" class="rc-add" data-rc="add">Ekle</button></div>`;
+export const isNagButton = b => 'nagEvery' in b.dataset || 'nagTimes' in b.dataset || 'nagSet' in b.dataset;
+
+// ---------- Ertele ----------
+export const SNOOZE_PRESETS = [[10, '10 dk'], [20, '20 dk'], [30, '30 dk'], [60, '1 saat'], [120, '2 saat'], [1440, 'Yarın']];
+export function snoozeHTML(active, typed = '') {
+  return `<div class="picker-row snz">${SNOOZE_PRESETS.map(([v, l]) => `<button type="button" class="chip" data-sz="${v}">${l}</button>`).join('')}</div>
+    <div class="snz-field"><input type="text" data-szv value="${esc(typed)}" placeholder="Süre yaz: 45 dk, 3 saat, 1 gün" aria-label="Erteleme süresi" autocomplete="off" autocapitalize="off" enterkeyhint="done">
+      <button type="button" class="rc-add" data-sz="typed" disabled>Ertele</button></div>
+    <p class="snz-when" aria-live="polite">Şu andan itibaren sayılır.</p>
+    ${active ? '<button type="button" class="chip snz-clear" data-sz="clear">Ertelemeyi kaldır</button>' : ''}`;
 }
-// Özel satırdaki düğmeleri işler; eklenecek değer (dakika) döner, yoksa null.
-export function handleCustom(btn) {
-  const box = btn.closest('.rem-custom');
-  const input = box.querySelector('[data-rcv]');
-  if (btn.dataset.unit) {
-    box.dataset.u = btn.dataset.unit;
-    box.querySelectorAll('[data-unit]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
-    haptic();
-    return null;
-  }
-  const v = Math.min(Math.max(parseInt(input.value, 10) || 1, 1), 999);
-  if (btn.dataset.rc === '-') { input.value = Math.max(1, v - (v > 10 ? 5 : 1)); haptic(); return null; }
-  if (btn.dataset.rc === '+') { input.value = Math.min(999, v + (v >= 10 ? 5 : 1)); haptic(); return null; }
-  const minutes = Math.round(v * UNITS[box.dataset.u] * 60) / 60;
-  return minutes <= 40320 ? minutes : null;
-}
-export function toggleReminder(list, value) {
-  if (value === 'none') return [];
-  const v = Number(value);
-  return list.includes(v) ? list.filter(x => x !== v) : [...list, v].sort((a, b) => b - a);
+export function paintSnooze(input, until, tz, today) {
+  const root = input.closest('.exp');
+  root.querySelector('[data-sz="typed"]').disabled = !until;
+  const when = root.querySelector('.snz-when');
+  when.classList.toggle('ok', Boolean(until));
+  when.textContent = until ? `Hatırlatma: ${whenAt(until, tz, today)}` : input.value.trim() ? 'Örnek: 42 dk, 1 gün 5 saat, 21:30' : 'Şu andan itibaren sayılır.';
 }
 
 // ---------- Tekrar ----------
 export function repeatHTML(it) {
   const cur = it.repeat === 'weekly' ? (it.weekdays.join() === '1,2,3,4,5' ? 'weekdays' : it.weekdays.join() === '6,0' ? 'weekend' : 'weekly') : it.repeat;
   const c = (v, l) => `<button type="button" class="chip ${cur === v ? 'on' : ''}" data-rep="${v}">${l}</button>`;
-  let html = `<div class="picker-row">${c('none', 'Tekrar yok')}${c('daily', 'Her gün')}${c('weekdays', 'Hafta içi')}${c('weekend', 'Hafta sonu')}${c('weekly', 'Haftalık')}${c('monthly', 'Aylık')}</div>`;
+  let html = `<div class="picker-row">${c('none', 'Tekrar yok')}${c('daily', 'Her gün')}${c('weekdays', 'Hafta içi')}${c('weekend', 'Hafta sonu')}${c('weekly', 'Haftalık')}${c('monthly', 'Aylık')}${c('yearly', 'Yıllık')}</div>`;
   if (it.repeat === 'weekly') html += `<div class="wdays">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button type="button" data-wday="${d}" aria-pressed="${it.weekdays.includes(d)}">${DAY_SHORT[d]}</button>`).join('')}</div>`;
+  if (it.repeat !== 'none') html += intervalHTML(it.interval || 1, { daily: 'günde', weekly: 'haftada', monthly: 'ayda', yearly: 'yılda' }[it.repeat]);
   return html;
 }
+export const intervalHTML = (n, unit) => `<div class="rem-custom int-row"><span class="rc-l">Sıklık</span>
+  <button type="button" class="rc-b" data-int="-1" aria-label="Azalt">${icon('minus')}</button>${numInput('data-intv', n, 'Tekrar aralığı')}
+  <button type="button" class="rc-b" data-int="1" aria-label="Artır">${icon('plus')}</button><span class="rc-l">${unit} bir</span></div>`;
+export const intervalOf = (v, step = 0) => Math.min(999, Math.max(1, (parseInt(v, 10) || 1) + Number(step)));
 export function applyRepeat(it, v, today) {
   const start = it.date || today;
-  if (v === 'none') return { ...it, repeat: 'none', weekdays: [] };
-  if (v === 'daily' || v === 'monthly') return { ...it, date: start, repeat: v, weekdays: [] };
-  if (v === 'weekdays') return { ...it, date: start, repeat: 'weekly', weekdays: [1, 2, 3, 4, 5] };
-  if (v === 'weekend') return { ...it, date: start, repeat: 'weekly', weekdays: [6, 0] };
-  return { ...it, date: start, repeat: 'weekly', weekdays: it.weekdays?.length ? it.weekdays : [weekday(start)] };
+  if (v === 'none') return { ...it, repeat: 'none', interval: 1, weekdays: [] };
+  if (v === 'daily' || v === 'monthly' || v === 'yearly') return { ...it, date: start, repeat: v, interval: it.repeat === v ? it.interval || 1 : 1, weekdays: [] };
+  if (v === 'weekdays') return { ...it, date: start, repeat: 'weekly', interval: 1, weekdays: [1, 2, 3, 4, 5] };
+  if (v === 'weekend') return { ...it, date: start, repeat: 'weekly', interval: 1, weekdays: [6, 0] };
+  return { ...it, date: start, repeat: 'weekly', interval: it.repeat === 'weekly' ? it.interval || 1 : 1, weekdays: it.weekdays?.length ? it.weekdays : [weekday(start)] };
 }
 export function toggleWeekday(it, d) {
   const set = new Set(it.weekdays);

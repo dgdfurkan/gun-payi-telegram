@@ -1,5 +1,5 @@
 // Planım: Gün / Hafta / Ay görünümleri ve satır işlemleri.
-import { itemsOn, dayAdd, weekday, mondayOf, monthDays, daysBetween, dayLabel, repeatLabel, remindersLabel, nagShort, statusOf, patchOccurrence, toMin, clockAt, DAY_SHORT, DAY_NAMES, MONTHS, pad } from './core.js';
+import { planOn, openBills, dayAdd, weekday, mondayOf, monthDays, daysBetween, dayLabel, repeatLabel, remindersLabel, nagShort, spanLabel, snoozeOf, whenAt, paidWord, periodName, statusOf, donePatch, patchOccurrence, toMin, clockAt, DAY_SHORT, DAY_NAMES, MONTHS, pad } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
 import { esc, haptic, toast, actions, reduced } from './ui.js';
@@ -7,6 +7,7 @@ import { ctx, today, tz } from './ctx.js';
 import { sync } from './api.js';
 import { catOf, CATS } from './categories.js';
 import { tile } from './pickers.js';
+import { openBillList, billState, askDeleteBill } from './billsview.js';
 import { appbar, hero, titleCase } from './chrome.js';
 
 const fullDate = d => { const [, m, dd] = d.split('-').map(Number); return `${dd} ${MONTHS[m - 1]} ${DAY_NAMES[weekday(d)]}`; };
@@ -19,23 +20,33 @@ function isoWeek(day) {
 }
 // Tamamlananlar varsayılan gizli; gizliyken listeden, sayılardan ve takvim noktalarından da çıkar.
 const showDone = () => get().prefs.showDone === true;
-export const visibleOn = (items, day) => itemsOn(items, day).filter(o => o.status !== 'done' || showDone());
+const listOn = (items, day) => planOn(items, day, today(), get().prefs);
+export const visibleOn = (items, day) => listOn(items, day).filter(o => o.status !== 'done' || showDone());
 
 export function itemRow(o, t, { stripe = false } = {}) {
   const s = get();
   const done = o.status === 'done';
   const key = catOf(o);
   const tags = [];
-  if (o.time && !done) {
-    const rem = o.reminders ?? s.prefs.reminderDefaults;
-    if (rem.length) tags.push(`<span class="tag">${icon('bell')}${esc(remindersLabel(rem))}</span>`);
-    if (o.nag) tags.push(`<span class="tag">${icon('again')}${esc(nagShort(o.nag))}</span>`);
+  const time = o.at?.time || o.time, date = o.at?.date || o.date;
+  if (o.bill) {
+    tags.push(`<span class="tag">${icon('cal')}${esc(spanLabel(o.date, o.end))}</span>`);
+    const st = billState(o, t);
+    tags.push(`<span class="tag st ${st.cls}">${esc(st.text)}</span>`);
+  } else {
+    const z = done ? null : snoozeOf(o);
+    if (z && z.until > Date.now()) tags.push(`<span class="tag st due">${icon('again')}${esc(`Ertelendi ${whenAt(z.until, s.prefs.timeZone, t)}`)}</span>`);
+    if (o.date && !done) {
+      const rem = o.reminders ?? (o.time ? s.prefs.reminderDefaults : []);
+      if (rem.length) tags.push(`<span class="tag">${icon('bell')}<b>${esc(remindersLabel(rem, !o.time))}</b></span>`);
+      if (o.nag) tags.push(`<span class="tag">${icon('again')}${esc(nagShort(o.nag))}</span>`);
+    }
+    if (o.repeat !== 'none') tags.push(`<span class="tag">${icon('repeat')}<b>${esc(repeatLabel(o))}</b></span>`);
   }
-  if (o.repeat !== 'none') tags.push(`<span class="tag">${icon('repeat')}${esc(repeatLabel(o))}</span>`);
   if (o.note) tags.push(`<span class="tag">${icon('notes')}Not</span>`);
   let cls = done ? 'done' : '';
-  if (o.date === t && o.time && !done) {
-    const now = clockAt(Date.now(), tz()).minutes, start = toMin(o.time), end = o.endTime ? toMin(o.endTime) : start + 30;
+  if (!o.bill && date === t && time && !done) {
+    const now = clockAt(Date.now(), tz()).minutes, start = toMin(time), end = o.endTime && !o.at ? toMin(o.endTime) : start + 30;
     if (now >= start && now < (end > start ? end : end + 1440)) cls += ' now';
     else if (now >= (end > start ? end : start + 30)) cls += ' past';
   }
@@ -45,12 +56,13 @@ export function itemRow(o, t, { stripe = false } = {}) {
   const ids = `data-id="${esc(o.id)}" data-origin="${esc(o.origin || '')}"`;
   // iOS tarzı: kart kayınca yanında ayrı, yuvarlak köşeli düğme açılır.
   return `<div class="swipe ${done ? 'is-done' : ''}" ${ids}>
-    <button type="button" class="sw-act sw-done" data-act="swipe-done" ${ids} aria-label="${done ? 'Geri al' : 'Tamamla'}"><span>${icon(done ? 'undo' : 'check')}<small>${done ? 'Geri al' : 'Tamamla'}</small></span></button>
+    <button type="button" class="sw-act sw-done" data-act="swipe-done" ${ids} aria-label="${done ? 'Geri al' : 'Tamamla'}"><span>${icon(done ? 'undo' : 'check')}<small>${done ? 'Geri al' : o.bill ? paidWord(o.bill) : 'Tamamla'}</small></span></button>
     <button type="button" class="sw-act sw-del" data-act="swipe-del" ${ids} aria-label="Sil"><span>${icon('trash')}<small>Sil</small></span></button>
     <div class="task ${cls}" ${color ? `style="--c:${color}"` : ''} data-act="open" ${ids}>
       ${tile(key)}
       <div class="task-main"><div class="task-title">${esc(o.title)}</div>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
-      ${o.time ? `<span class="time-pill">${o.time}${o.endTime ? `<small>${o.endTime}</small>` : ''}</span>` : ''}
+      ${o.bill && !done ? `<button type="button" class="pay-btn ${o.date > t ? 'quiet' : ''}" data-act="swipe-done" ${ids}>${paidWord(o.bill)}</button>`
+        : time && !o.bill ? `<span class="time-pill">${time}${o.endTime && !o.at ? `<small>${o.endTime}</small>` : ''}</span>` : ''}
     </div></div>`;
 }
 
@@ -84,7 +96,7 @@ function swipeHint() {
 
 function dayBody(day, t) {
   const s = get();
-  const all = itemsOn(s.items, day);
+  const all = listOn(s.items, day);
   const list = all.filter(o => o.status !== 'done' || showDone());
   const inbox = day === t ? s.items.filter(i => !i.date && (i.status === 'pending' || (showDone() && i.status === 'done'))) : [];
   let html = '';
@@ -162,7 +174,9 @@ export function renderPlan() {
   else if (ctx.mode === 'week') body = weekBody(sel, t);
   else body = monthBody(sel, t);
   const eye = `<button type="button" class="icon-btn ${showDone() ? 'on' : ''}" data-act="toggle-done" aria-pressed="${showDone()}" aria-label="${showDone() ? 'Tamamlananları gizle' : 'Tamamlananları göster'}">${icon(showDone() ? 'eye' : 'eyeOff')}</button>`;
-  return `${appbar('Plan', (off ? '<button type="button" class="pill-btn" data-act="today">Bugün</button>' : '') + eye)}
+  const owed = openBills(get().items, t).length;
+  const bills = `<button type="button" class="icon-btn bills-btn" data-act="bills" aria-label="Faturalar${owed ? `, ${owed} ödeme bekliyor` : ''}">${icon('bill')}${owed ? `<i>${owed}</i>` : ''}</button>`;
+  return `${appbar('Plan', (off ? '<button type="button" class="pill-btn" data-act="today">Bugün</button>' : '') + bills + eye)}
     <div class="page">${hero(kicker, title)}
     <div class="seg" style="--i:${['day', 'week', 'month'].indexOf(ctx.mode)}" role="group" aria-label="Görünüm">${seg}</div>${body}</div>`;
 }
@@ -174,7 +188,7 @@ async function setDone(id, origin, next) {
   const before = structuredClone(item);
   await commit(s => {
     const i = s.items.findIndex(x => x.id === id);
-    s.items[i] = item.date ? patchOccurrence(s.items[i], origin || item.date, { status: next }) : { ...s.items[i], status: next, updatedAt: new Date().toISOString() };
+    s.items[i] = item.date ? patchOccurrence(s.items[i], origin || item.date, donePatch(item, next, today())) : { ...s.items[i], status: next, updatedAt: new Date().toISOString() };
   });
   sync();
   return before;
@@ -203,6 +217,7 @@ export const planActs = {
     commit(s => { s.prefs.showDone = next; });
     toast(next ? 'Tamamlananlar gösteriliyor' : 'Tamamlananlar gizlendi');
   },
+  bills: () => { haptic(); openBillList(); },
   'swipe-del': el => deleteRow(el.closest('.swipe')),
   'swipe-done': el => completeRow(el.closest('.swipe')),
   // Özet sayfasındaki hızlı tamamla düğmesi
@@ -265,7 +280,7 @@ async function completeRow(wrap) {
   if (!undo && !showDone()) await flyOut(wrap, 1);  // gizliyken akıp gider
   else closeRow(wrap);                                 // görünürken üstü çizilir, yerinde kalır
   const before = await setDone(id, origin, undo ? 'pending' : 'done');
-  if (before && !undo) toast('Tamamlandı', { label: 'Geri al', run: () => commit(s => { const i = s.items.findIndex(x => x.id === id); if (i >= 0) s.items[i] = before; }).then(() => sync()) });
+  if (before && !undo) toast(before.bill ? `${periodName(origin)} dönemi tamam` : 'Tamamlandı', { label: 'Geri al', run: () => commit(s => { const i = s.items.findIndex(x => x.id === id); if (i >= 0) s.items[i] = before; }).then(() => sync()) });
 }
 
 export async function deleteRow(wrap) {
@@ -274,7 +289,10 @@ export async function deleteRow(wrap) {
   const item = get().items.find(i => i.id === id);
   if (!item) return;
   let choice = 'all';
-  if (item.repeat !== 'none' && origin) {
+  if (item.bill) {
+    choice = await askDeleteBill(item, origin);
+    if (!choice) { closeRow(wrap); return; }
+  } else if (item.repeat !== 'none' && origin) {
     choice = await actions(`“${item.title}” tekrarlayan bir plan`, [{ label: 'Sadece bu günü sil', value: 'one' }, { label: 'Tüm seriyi sil', value: 'all', danger: true }]);
     if (!choice) { closeRow(wrap); return; }
   }
@@ -286,7 +304,7 @@ export async function deleteRow(wrap) {
     else s.items = s.items.filter(z => z.id !== id);
   });
   sync();
-  toast(choice === 'one' ? 'Bu gün silindi' : 'Silindi', { label: 'Geri al', run: () => commit(s => { s.items = s.items.filter(z => z.id !== id).concat(before); }).then(() => sync()) });
+  toast(choice === 'one' ? (item.bill ? 'Bu dönem atlandı' : 'Bu gün silindi') : 'Silindi', { label: 'Geri al', run: () => commit(s => { s.items = s.items.filter(z => z.id !== id).concat(before); }).then(() => sync()) });
 }
 
 export function bindSwipe(view) {

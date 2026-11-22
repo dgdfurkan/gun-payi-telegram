@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **19 Kasım 2026**. Sürüm **5.6.1**.
+Güncelleme: **22 Kasım 2026**. Sürüm **5.7.0**. Canlıdaki sürüm: `GET /health`.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,14 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.7
+
+- **Erteleme:** 5.6'da tekrarlar eski plan saatinden sürüyor ve mesaj eski saati yazıyordu. Artık basılan/yazılan andan; tekrarlar ve mesajdaki saat de oradan. "Süre yaz" düğmesi kalktı, süre doğrudan sohbete yazılır. Aynısı uygulamada plan sayfasında. Bekleyen 5.6 ertelemeleri ilk `load()`'da plana taşınır.
+- **Sınırlar:** hatırlatma saniyeden 10 yıla (takvim ayı/yıl dahil), en çok 100 tane; tekrar hatırlatma 1 yılda bir / 1000 kez; her N gün/hafta/ay/yıl. Saatsiz tarihli plan istenen hatırlatmayı `allDayTime`'da gönderir (önceden hiç göndermiyordu).
+- **Faturalar:** Plan üst çubuğunda. Aralık/net gün, sıklık, otomatik çekim, önce/sonra günleri, dönem başına Ödedim. Cümleyle de eklenir.
+- **Söyleyiş:** "20'yi 10 geçe", "9'a 10 kala", "1 gün 5 saat sonra".
+- **Açılış:** `#splash` animasyonu kaldırıldı. Simülatörde (iOS 18.1) iOS'un kendi siyah geçişi açık/koyu modda ve yeni kurulumda da kalıyor; `apple-touch-startup-image` bunu değiştirmedi. Ana ekrandan silip yeniden eklemeyi önermeyin: yerel veri silinir.
 
 ## 5.6.1
 
@@ -71,7 +79,7 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 
 ## Doğrulananlar
 
-- `npm test`: 72 test (çözümleyici, uygulama, Worker; Telegram ve AI sahte yanıtla).
+- `npm test`: 97 test (sahte saatle aylar süren alarm zinciri, 1500 rastgele planlık zamanlama karşılaştırması dahil).
 - `wrangler deploy --dry-run` paketleme ve bağlamalar.
 - `wrangler dev` ile 375×667 tarayıcıda karşılama, ekleme, çip düzenleme, tamamlama, düzenleme, hafta/ay, notlar, özet, ayarlar; açık ve koyu tema.
 - Canlı (18 Kasım): sürüm 5.0.0 `wrangler deploy` ile yayında, `BOT_TOKEN` tanımlı (bot: @hatirlat_gunduz_bot), webhook kuruldu. Kullanıcı telefondan bağlandı ve anlık deneme mesajını aldı.
@@ -89,8 +97,9 @@ Bunlar gerçek cihaz/hesap ister, yapıldı denmemeli:
 6. Saat çarkının iOS'ta kaydırma hissi, panelin klavyeyle yer değiştirmesi, tema geçişi.
 7. Telegram taslak düğmelerinin gerçek botta akışı.
 8. Tekrar hatırlatmanın ve Ertele menüsünün gerçek botta zamanında gelmesi.
+9. 5.7: gerçek botta sohbete yazarak erteleme, fatura hatırlatması, gerçek iPhone'da açılış ve 5.6.1'den service worker güncellemesi.
 
 ## Sıradaki olası işler
 
 - Kısayol dosyası adresi sabit (`gun-payi-telegram.frkngndz60.workers.dev`); adres değişirse Mac'te yeniden üretip `shortcuts sign --mode anyone` ile imzalanmalı.
-- Biweekly ("iki haftada bir") gibi desteklenmeyen tekrarlar şu an AI yedeğinde haftalığa iner.
+- Desteklenmeyen tekrarlar ("her ayın ilk cuması") AI yedeğine kalır. Tekrar bitiş tarihi (`until`) için arayüz yok.

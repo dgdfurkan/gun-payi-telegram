@@ -3,7 +3,7 @@ import { load, get, subscribe, commit } from './store.js';
 import * as api from './api.js';
 import { ctx, today } from './ctx.js';
 import { icon } from './icons.js';
-import { $, $$, esc, haptic, applyTheme, reduced } from './ui.js';
+import { $, $$, esc, haptic, applyTheme } from './ui.js';
 import { renderPlan, planActs, bindSwipe, closeOpenRow } from './plan.js';
 import { openCompose, openItem } from './compose.js';
 import { renderNotes, renderReview, renderSettings, pageActs, onInput, onChange, prepareLink, linkState, watchLink, checkLinkNow, refreshStatus } from './pages.js';
@@ -80,7 +80,7 @@ document.addEventListener('change', e => { if (!e.target.closest('.sheet-root') 
 document.addEventListener('focusout', () => setTimeout(() => { if (pending) render(); }, 0));
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
+  if (document.hidden) { api.flush(); return; }
   checkLinkNow();
   api.syncIfStale();
   if (renderedDay && renderedDay !== today()) { if (ctx.day === renderedDay) ctx.day = today(); render(); }
@@ -141,14 +141,6 @@ const welcomeActs = {
   'w-tg': () => { watchLink(); setTimeout(paintWelcome, 400); },
   'w-done': async () => { await checkLinkNow(); finishWelcome(); },
 };
-// Açılış animasyonu en az bir tur oynasın, sonra yumuşakça kaybolsun.
-function hideSplash() {
-  const el = document.getElementById('splash');
-  if (!el) return;
-  const wait = reduced() ? 0 : Math.max(0, 1250 - performance.now());
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 500); }, wait);
-}
-
 // --- açılış ---
 (async () => {
   await load();
@@ -161,7 +153,6 @@ function hideSplash() {
   subscribe(() => render());
   api.onLinkChange(() => { render(); if (welcomeEl && api.link()) finishWelcome(); });
   if (!s.onboarded) welcome();
-  hideSplash();
   api.sync(true).then(r => { if (r) render(); });
   if ('serviceWorker' in navigator) {
     if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));

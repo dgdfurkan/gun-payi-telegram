@@ -4,6 +4,7 @@ iPhone'da uygulama gibi çalışan kişisel ajanda (PWA). Gününü planla, söy
 
 - **Söyle, eklensin:** "Her cuma 12'de babaannemi ara, 10 ve 15 dk önce hatırlat" yazman ya da söylemen yeter. Gün, saat, tekrar ve hatırlatma cümleden çıkarılır, kaydetmeden önce dokunup düzeltilebilir.
 - **Telegram hatırlatması:** Uygulama kapalıyken de gelir, Mi Band gibi saatlere Telegram bildirimi olarak ulaşır. Bota yazarak ya da sesli mesajla da plan eklenir.
+- **Faturalar:** Net gün ya da tarih aralığı seçilir; ödendi denene kadar hatırlatır, sonraki dönem yeniden başlar.
 - **Ana ekran widget'ı:** iOS Kısayollar widget'ıyla uygulamayı açmadan sesle ekleme.
 - **Veriler telefonda:** Hesap yok. Sunucuya yalnız hatırlatma için planların kopyası gider.
 
@@ -13,7 +14,7 @@ Uygulama ve API aynı Cloudflare Worker'da, aynı adreste çalışır: <https://
 
 1. Telegram'da **@BotFather** → `/newbot` ile bir bot aç, tokenı al.
 2. Cloudflare → **Workers & Pages → gun-payi-telegram → Settings → Variables and Secrets → Add**: tür **Secret**, ad `BOT_TOKEN`, değer bot tokenı. Kaydet.
-3. `main` dalına her push'ta Cloudflare Worker'ı kendisi derleyip yayımlar (GitHub bağlantısı kurulu).
+3. Yayın: `main`'e push'tan sonra `npx wrangler deploy` (Cloudflare push'ta kendiliğinden derlemiyor).
 
 Webhook, bot komutları ve Workers AI ayrıca ayar istemez. Webhook ilk "Telegram'a bağlan" dokunuşunda kendiliğinden kurulur.
 

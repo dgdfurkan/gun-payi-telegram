@@ -1,5 +1,5 @@
 // Cloudflare Workers AI: ses → metin (Whisper) ve kuralların anlamadığı cümleler için yedek çözümleme.
-import { dayAt, clockAt, weekday, DAY_NAMES, isDate, isTime, fromMin } from '../web/js/core.js';
+import { clockAt, weekday, DAY_NAMES, isDate, isTime, fromMin, MAX_MINUTES } from '../web/js/core.js';
 import { parse } from '../web/js/parse.js';
 
 const TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
@@ -29,7 +29,7 @@ const SCHEMA = {
     date: { type: 'string' },
     time: { type: 'string' },
     endTime: { type: 'string' },
-    repeat: { type: 'string', enum: ['none', 'daily', 'weekly', 'monthly'] },
+    repeat: { type: 'string', enum: ['none', 'daily', 'weekly', 'monthly', 'yearly'] },
     weekdays: { type: 'array', items: { type: 'integer' } },
     reminders: { type: 'array', items: { type: 'integer' } },
   },
@@ -45,8 +45,8 @@ export async function aiParse(env, text, { now = Date.now(), tz = 'Europe/Istanb
     `Bugün ${day} (${DAY_NAMES[weekday(day)]}), saat ${fromMin(minutes)}, saat dilimi ${tz}.`,
     'Alanlar: kind (task: saatsiz iş, event: saatli plan, note: not), title (kısa, emir kipinde, zaman ifadeleri ve "ekle/hatırlat" gibi komutlar olmadan, ilk harf büyük),',
     'date (YYYY-MM-DD; tekrarlarda ilk gerçekleşme; tarih yoksa ""), time ("HH:MM" 24 saat; yoksa ""), endTime (yoksa ""),',
-    'repeat (none|daily|weekly|monthly), weekdays (weekly için; 0=Pazar,1=Pazartesi,...,6=Cumartesi), reminders (başlangıçtan kaç dakika önce; söylenmediyse []).',
-    'Saat 1-6 arası ve sabah denmediyse öğleden sonra kabul et (3 → 15:00). "Akşam 8" → 20:00. "Her iki haftada bir" desteklenmez: weekly yap.',
+    'repeat (none|daily|weekly|monthly|yearly), weekdays (weekly için; 0=Pazar,1=Pazartesi,...,6=Cumartesi), reminders (başlangıçtan kaç dakika önce; söylenmediyse []).',
+    'Saat 1-6 arası ve sabah denmediyse öğleden sonra kabul et (3 → 15:00). "Akşam 8" → 20:00.',
   ].join('\n');
   try {
     const res = await env.AI.run(env.AI_TEXT_MODEL || TEXT_MODEL, {
@@ -64,12 +64,13 @@ export async function aiParse(env, text, { now = Date.now(), tz = 'Europe/Istanb
     out.date = isDate(r.date) ? r.date : '';
     out.time = isTime(r.time) ? r.time : '';
     out.endTime = out.time && isTime(r.endTime) ? r.endTime : '';
-    out.repeat = ['none', 'daily', 'weekly', 'monthly'].includes(r.repeat) ? r.repeat : 'none';
+    out.repeat = ['none', 'daily', 'weekly', 'monthly', 'yearly'].includes(r.repeat) ? r.repeat : 'none';
     out.weekdays = Array.isArray(r.weekdays) ? [...new Set(r.weekdays.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))] : [];
     if (out.repeat === 'weekly' && !out.weekdays.length) out.repeat = 'none';
     if (out.repeat !== 'none' && !out.date) out.date = day;
-    const rem = Array.isArray(r.reminders) ? [...new Set(r.reminders.filter(n => Number.isInteger(n) && n >= 0 && n <= 40320))] : [];
-    out.reminders = rem.length ? rem : (fallback?.reminders ?? null);
+    const rem = Array.isArray(r.reminders) ? [...new Set(r.reminders.filter(n => Number.isInteger(n) && n >= 0 && n <= MAX_MINUTES))] : [];
+    // Kuralların bulduğu hatırlatma ("1 ay önce" takvim ayıdır) AI'ın dakika tahmininden önce gelir.
+    out.reminders = fallback?.reminders ?? (rem.length ? rem : null);
     out.doubt = [];
     return out;
   } catch {
