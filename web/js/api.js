@@ -8,6 +8,19 @@ export function link() {
 function setLink(v) {
   try { v ? localStorage.setItem(LINK_KEY, JSON.stringify(v)) : localStorage.removeItem(LINK_KEY); } catch { /* özel mod */ }
 }
+const MOVING = 'gp-moving';
+// Taşıma sürerken bu kopya eşitlemez (move.js)
+export function moving() {
+  try { return localStorage.getItem(MOVING) === '1'; } catch { return false; }
+}
+export function setMoving(on) {
+  try { on ? localStorage.setItem(MOVING, '1') : localStorage.removeItem(MOVING); return true; } catch { return false; }
+}
+export const syncing = () => Boolean(running);
+export function restoreLink(v) {
+  setLink(v);
+  listeners.forEach(f => f());
+}
 export const token = () => { const l = link(); return l ? `${l.chatId}.${l.secret}` : ''; };
 
 async function call(path, { body, method = 'POST', auth = true } = {}) {
@@ -58,7 +71,7 @@ export const aiParse = (text, tz) => call('parse', { body: { text, now: Date.now
 let timer = null, waiting = false, running = null, last = 0, lastStatus = null;
 export const lastSync = () => lastStatus;
 export function sync(now = false) {
-  if (!link()) return Promise.resolve(null);
+  if (!link() || moving()) return Promise.resolve(null);
   clearTimeout(timer);
   waiting = !now;
   if (!now) { timer = setTimeout(() => sync(true), 1500); return Promise.resolve(null); }

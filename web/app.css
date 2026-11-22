@@ -436,7 +436,9 @@ button.cell:active { background: var(--s-low); }
 .rem-custom { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid var(--sep); }
 .rc-l { font-size: 12px; font-weight: 700; color: var(--label-2); margin-right: 2px; }
 .rc-b { width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; background: var(--s-low); color: var(--accent); }
-.rc-b .i { width: 16px; height: 16px; stroke-width: 2.6; }
+.rc-b { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform .15s var(--spring), background .15s; }
+.rc-b:active { transform: scale(.88); background: var(--accent-soft); }
+.rc-b .i { width: 16px; height: 16px; stroke-width: 2.6; pointer-events: none; }
 .rem-custom input { width: 64px; height: 34px; border: 0; border-radius: 12px; background: var(--s-low); text-align: center; font-size: 15px; font-weight: 800; outline: none; -moz-appearance: textfield; }
 .rem-custom input::-webkit-inner-spin-button, .rem-custom input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .unit-seg { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--s-low); }
@@ -548,6 +550,17 @@ code { font: 12px ui-monospace, Menlo, monospace; word-break: break-all; }
 .install-tip .i { color: var(--accent); }
 .hint { margin: 10px 4px 0; font-size: 13px; color: var(--label-2); line-height: 1.4; }
 .hint.err { color: var(--red); }
+
+/* ---------- Açılış ekranını yenileme ---------- */
+.welcome.move { z-index: 40; }
+.welcome.move h1 { margin-top: 0; font-size: 27px; line-height: 32px; }
+.welcome.move p { margin-bottom: 16px; }
+.move-steps { margin: 0; padding: 0; list-style: none; counter-reset: mv; }
+.move-steps li { position: relative; counter-increment: mv; margin-bottom: 8px; padding: 12px 14px 12px 46px; border-radius: 18px; background: var(--card); box-shadow: var(--card-shadow); }
+.move-steps li::before { content: counter(mv); position: absolute; left: 12px; top: 10px; width: 24px; height: 24px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 800; }
+.move-steps b { display: block; font-size: 14px; font-weight: 800; }
+.move-steps small { display: block; margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--label-3); overflow-wrap: anywhere; }
+.move-steps .big-btn { height: 44px; margin-top: 8px; font-size: 15px; }
 
 /* ---------- Alt sayfa ---------- */
 .sheet-root { position: fixed; inset: 0; z-index: 50; }

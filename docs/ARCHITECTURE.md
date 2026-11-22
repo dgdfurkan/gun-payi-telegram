@@ -9,6 +9,7 @@
 | `web/js/dates.js` | **Ortak:** tarih, saat dilimi, takvim ayı ilkelleri (bağımlılıksız) |
 | `web/js/bills.js` | **Ortak:** fatura türleri ve dönem hesabı |
 | `web/js/jobs.js` | **Ortak:** hatırlatma zamanlaması (plan, tekrar, erteleme, fatura) tek yerde |
+| `web/js/move.js` | Açılış ekranını yenileme: veriyi eski simgeden yenisine kayıpsız taşıma |
 | `web/js/billsview.js` | Faturalar listesi ve fatura düzenleyici |
 | `web/js/parse.js` | **Ortak:** Türkçe doğal dil çözümleyici (kural tabanlı) |
 | `web/js/store.js` | IndexedDB durumu, sunucu olaylarını uygulama, yedek (eski schema 1 dahil) |
@@ -25,6 +26,7 @@
 | `web/sw.js` | Kabuk önbelleği (sürüm `web/js/version.js` ile aynı olmalı) |
 | `worker/index.js` | Yönlendirme: `/api/*`, `/telegram/webhook`, `/health`, gerisi statik dosya |
 | `worker/hub.js` | Durable Object `ReminderHub`: `meta` (bağlantı kodları, bot) ve `chat:<id>` (plan aynası, olaylar, alarm) |
+| `worker/install.js` | `GET /api/kur`: önbelleksiz, betiksiz Ana Ekrana Ekle sayfası |
 | `worker/telegram.js`, `ai.js` | Bot API ve mesaj biçimleri; Workers AI (Whisper, yedek çözümleme) |
 | `wrangler.jsonc` | Üretim: assets + DO + AI + rate limit. `wrangler.dev.jsonc` yerel (AI'sız) |
 
@@ -69,6 +71,7 @@ Senkron yalnız açılışta, değişiklikten 1,5 sn sonra ve uygulama öne geli
 
 | Yol | Kimlik | İşlev |
 | --- | --- | --- |
+| `GET /api/kur[?koyu=1]` | yok | Ana Ekrana Ekle sayfası (kullanıcı verisi yok) |
 | `GET /health` | yok | `{service, version, alarm, bot, ai}` |
 | `GET /api/config` | yok | bot ve AI hazır mı |
 | `POST /api/link/start`, `/api/link/check` | yok (rate limit) | Telegram bağlantısı |

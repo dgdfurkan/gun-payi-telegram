@@ -4,6 +4,7 @@ import worker, { ReminderHub } from '../worker/index.js';
 import { webhookSecret } from '../worker/hub.js';
 import { clockAt, fromMin, zonedMs, dayAt, hmAt, cleanItem, patchOccurrence, donePatch, makeSnooze } from '../web/js/core.js';
 import { applyEvent } from '../web/js/store.js';
+import { existsSync } from 'node:fs';
 
 class Storage {
   constructor() { this.m = new Map(); this.alarm = null; }
@@ -615,4 +616,18 @@ timed('hatırlatma geldikten sonra tekrarlıya çevrilen plan bozulmaz', async (
   await w.say('15 dakika');
   assert.ok(w.hub.s.cal.items.every(i => !('' in i.exceptions)), 'boş günlü istisna yazılmaz');
   assert.equal((await w.sync()).length, 1);
+});
+
+test('ekleme sayfası: önbelleğe girmez, güncel açılış görselini verir, anahtar istemez', async () => {
+  const t = setup();
+  const light = await t.call('/api/kur', { method: 'GET' });
+  assert.equal(light.status, 200);
+  assert.match(light.headers.get('cache-control'), /no-store/);
+  const html = await light.text();
+  assert.match(html, /href="\/manifest\.webmanifest"/);
+  assert.match(html, /\/icons\/splash-750x1334\.png/);
+  assert.doesNotMatch(html, /<script/, 'uygulama kodu çalışmaz, eşitleme yapmaz');
+  const dark = await (await t.call('/api/kur?koyu=1', { method: 'GET' })).text();
+  assert.match(dark, /\/icons\/splash-koyu-750x1334\.png/);
+  for (const [, p] of (html + dark).matchAll(/href="\/(icons\/[^"]+)"/g)) assert.ok(existsSync(new URL('../web/' + p, import.meta.url)), p);
 });

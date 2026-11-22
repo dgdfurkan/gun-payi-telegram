@@ -1,6 +1,7 @@
 // Gün Payı: aynı adreste PWA (statik dosyalar) + API + Telegram webhook.
 import { ReminderHub, webhookSecret } from './hub.js';
 import { send } from './telegram.js';
+import { installPage } from './install.js';
 import { VERSION } from '../web/js/version.js';
 
 // Giriş modülü yalnız işleyici ve Durable Object sınıfı dışa aktarabilir.
@@ -85,6 +86,7 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === '/health') return json({ service: 'gun-payi', version: VERSION, alarm: Boolean(env.HUB), bot: Boolean(env.BOT_TOKEN), ai: Boolean(env.AI) });
     if (url.pathname === '/telegram/webhook' && req.method === 'POST') return webhook(req, env);
+    if (url.pathname === '/api/kur' && req.method === 'GET') return installPage({ dark: url.searchParams.get('koyu') === '1' });
     if (url.pathname.startsWith('/api/')) return api(req, env, url);
     return env.ASSETS ? env.ASSETS.fetch(req) : text('Bulunamadı', 404);
   },

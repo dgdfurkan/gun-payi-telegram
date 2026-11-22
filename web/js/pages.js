@@ -7,6 +7,7 @@ import { ctx, today } from './ctx.js';
 import * as api from './api.js';
 import { appbar, hero } from './chrome.js';
 import { avatarHTML, openAvatarSheet } from './avatar.js';
+import { canRenew, openMove, readMove, applyMove } from './move.js';
 import { catOf } from './categories.js';
 import { tile, wheelHTML, bindWheel, reminderHTML, handleCustom, toggleReminder, withTypedReminder } from './pickers.js';
 import { VERSION } from './version.js';
@@ -105,6 +106,7 @@ export function renderSettings() {
   const modeIdx = Math.max(0, MODE_LIST.findIndex(([k]) => k === s.prefs.mode));
   return `${appbar('Ayarlar')}<div class="page">
     <div class="group"><div class="profile"><button type="button" class="profile-av" data-act="avatar" aria-label="Profil fotoğrafı">${avatarHTML('lg')}<span class="cam">${icon('camera')}</span></button><label style="flex:1;min-width:0"><input type="text" value="${esc(s.prefs.name)}" placeholder="Adın" data-input="name" enterkeyhint="done" autocomplete="given-name"><small>Fotoğrafa dokun: resim ve çerçeve seç</small></label></div></div>
+    ${canRenew() ? `<div class="group"><button type="button" class="cell" data-act="renew"><span class="cell-ic">${icon('sun')}</span><span class="cell-label">Açılış ekranını yenile<small>Siyah ekrandaki logoyu kaldırır, veriler taşınır</small></span>${icon('chevR', 'chev')}</button></div>` : ''}
     <div class="section-h">Görünüm</div>
     <div class="group">
       <div class="look"><span>Renk</span><div class="dots-pick">${COLOR_DOTS.map(([k, label, p, pc]) => `<button type="button" class="dot-c ${s.prefs.color === k ? 'on' : ''}" data-act="color" data-c="${k}" style="--dp:${p};--dc:${pc}" aria-label="${label}"></button>`).join('')}</div></div>
@@ -219,6 +221,15 @@ async function pasteBackup() {
     let data;
     try { data = parseBackup(raw); } catch (e) { toast(e.message); return false; }
     const s = get();
+    const move = readMove(JSON.parse(String(raw).trim()));
+    if (move) {
+      if (data.skipped.length) { toast('Kopya eksik görünüyor. Eski simgede “Yeniden kopyala”ya dokun.'); return false; }
+      if ((s.items.length || s.notes.length) && !(await confirmDanger('Bu simgedeki her şey taşınan verilerle değişsin mi?', 'Taşınanlarla değiştir'))) return false;
+      await applyMove(data, move);
+      haptic('success');
+      toast(`Taşındı: ${data.items.length} plan, ${data.notes.length} not. Eski simgeyi silebilirsin`);
+      return true;
+    }
     const sum = `${data.items.length} plan, ${data.notes.length} not${data.legacy ? ' (eski uygulama)' : ''}`;
     const choice = s.items.length || s.notes.length
       ? await actions(`Yedekte ${sum} var.`, [{ label: 'Mevcut verilere ekle', value: 'merge' }, { label: 'Her şeyi yedekle değiştir', value: 'replace', danger: true }])
@@ -241,8 +252,8 @@ async function pasteBackup() {
   };
   if (text.trim().startsWith('{')) { await apply(text); return; }
   const sh = sheet({
-    title: 'Yedeği yapıştır', right: 'Yükle',
-    body: `<div class="form"><p class="section-f" style="padding-top:12px">Eski uygulamada <b>Ayarlar → Yedeği kopyala</b>’ya dokun, sonra buraya yapıştır.</p><div class="group" style="margin-top:10px"><textarea class="note-input" style="min-height:30vh;font:13px ui-monospace,Menlo,monospace" placeholder="{ … }" aria-label="Yedek"></textarea></div></div>`,
+    title: 'Yapıştır', right: 'Yükle',
+    body: `<div class="form"><p class="section-f" style="padding-top:12px">Eski simgede ya da <b>Ayarlar → Yedeği kopyala</b> ile kopyaladığını buraya yapıştır.</p><div class="group" style="margin-top:10px"><textarea class="note-input" style="min-height:30vh;font:13px ui-monospace,Menlo,monospace" placeholder="{ … }" aria-label="Yedek"></textarea></div></div>`,
     onRight: async api2 => { if (await apply($('textarea', api2.body).value)) api2.close(); },
   });
   $('textarea', sh.body).focus({ preventScroll: true });
@@ -309,6 +320,7 @@ export const pageActs = {
   'def-rem': () => { haptic(); defaultRemSheet(); },
   'allday-time': () => { haptic(); timeSheet('Hatırlatma saati', get().prefs.allDayTime, (s, v) => { s.prefs.allDayTime = v; }); },
   'digest-at': () => { haptic(); timeSheet('Sabah özeti', get().prefs.digest.time, (s, v) => { s.prefs.digest.time = v; }); },
+  renew: () => { haptic(); openMove(); },
   widget: () => widgetSheet(),
   avatar: () => { haptic(); openAvatarSheet(() => ctx.render()); },
   color: el => {

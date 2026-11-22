@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **22 Kasım 2026**. Sürüm **5.7.0**. Canlıdaki sürüm: `GET /health`.
+Güncelleme: **22 Kasım 2026**. Sürüm **5.8.0**. Canlıdaki sürüm: `GET /health`.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -22,13 +22,22 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
 
+## 5.8
+
+- **Siyah zeminde logo:** 5.0'ın `splash-750x1334-dark.png` görseliydi. iOS `apple-touch-startup-image`'ı yalnız Ana Ekrana Ekle anında simgenin içine (`<uuid>.webclip/startup.png`) kopyalar; siteyi değiştirmek kurulu simgeyi etkilemez (WebApp.framework kodu ve simülatörde birebir deneyle doğrulandı). 5.7'deki "iOS çiziyor" teşhisi yanlıştı.
+- **Açılış görseli kuralı:** ortasına logo koyma, saydamlık kullanma, boyut tam ekran pikseli olsun. Koyu mod medya sorgusuyla görsel seçtirme: kurulum anındaki mod kalıcı olur.
+- **Yenileme akışı (`web/js/move.js`, `worker/install.js`):** Ayarlar → Açılış ekranını yenile. Veri + bağlantı + fotoğraf + imleç panoya gider; eski kopya `gp-moving` ile donar ve eşitlemez; `/api/kur` Safari'deki eski service worker'ı atlar; yeni simgede "Eski simgeden taşı". Taşımadan simge silinirse yerel veri gider.
+- `x-safari-https` yalnız https içindir; `x-safari-http` yoktur (yerel denemede düğme hata verir).
+- iOS'un kabuk zemini (uygulama tamamen kapalıyken açılıştaki ~0,3 sn) sistem arka planıdır, web'den değiştirilemez. Simülatör açık modda Apple uygulamalarında bile siyah çizer, renk için kanıt sayılmaz.
+- Özel süre: dk / sa / gün; artı eksi birer birer, basılı tutunca hızlanır (`bindHold`). Ay ve hafta hazır çiplerde ve cümlede duruyor.
+
 ## 5.7
 
 - **Erteleme:** 5.6'da tekrarlar eski plan saatinden sürüyor ve mesaj eski saati yazıyordu. Artık basılan/yazılan andan; tekrarlar ve mesajdaki saat de oradan. "Süre yaz" düğmesi kalktı, süre doğrudan sohbete yazılır. Aynısı uygulamada plan sayfasında. Bekleyen 5.6 ertelemeleri ilk `load()`'da plana taşınır.
 - **Sınırlar:** hatırlatma saniyeden 10 yıla (takvim ayı/yıl dahil), en çok 100 tane; tekrar hatırlatma 1 yılda bir / 1000 kez; her N gün/hafta/ay/yıl. Saatsiz tarihli plan istenen hatırlatmayı `allDayTime`'da gönderir (önceden hiç göndermiyordu).
 - **Faturalar:** Plan üst çubuğunda. Aralık/net gün, sıklık, otomatik çekim, önce/sonra günleri, dönem başına Ödedim. Cümleyle de eklenir.
 - **Söyleyiş:** "20'yi 10 geçe", "9'a 10 kala", "1 gün 5 saat sonra".
-- **Açılış:** `#splash` animasyonu kaldırıldı. Simülatörde (iOS 18.1) iOS'un kendi siyah geçişi açık/koyu modda ve yeni kurulumda da kalıyor; `apple-touch-startup-image` bunu değiştirmedi. Ana ekrandan silip yeniden eklemeyi önermeyin: yerel veri silinir.
+- **Açılış:** `#splash` animasyonu kaldırıldı. Siyah ekran teşhisi 5.8'de düzeltildi.
 
 ## 5.6.1
 
@@ -79,7 +88,7 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 
 ## Doğrulananlar
 
-- `npm test`: 97 test (sahte saatle aylar süren alarm zinciri, 1500 rastgele planlık zamanlama karşılaştırması dahil).
+- `npm test`: 101 test (sahte saatle aylar süren alarm zinciri, 1500 rastgele planlık zamanlama karşılaştırması, taşıma dahil). 5.8 taşıması iOS 18.1 simülatöründe 5.0 kurulumundan uçtan uca denendi.
 - `wrangler deploy --dry-run` paketleme ve bağlamalar.
 - `wrangler dev` ile 375×667 tarayıcıda karşılama, ekleme, çip düzenleme, tamamlama, düzenleme, hafta/ay, notlar, özet, ayarlar; açık ve koyu tema.
 - Canlı (18 Kasım): sürüm 5.0.0 `wrangler deploy` ile yayında, `BOT_TOKEN` tanımlı (bot: @hatirlat_gunduz_bot), webhook kuruldu. Kullanıcı telefondan bağlandı ve anlık deneme mesajını aldı.
@@ -98,6 +107,7 @@ Bunlar gerçek cihaz/hesap ister, yapıldı denmemeli:
 7. Telegram taslak düğmelerinin gerçek botta akışı.
 8. Tekrar hatırlatmanın ve Ertele menüsünün gerçek botta zamanında gelmesi.
 9. 5.7: gerçek botta sohbete yazarak erteleme, fatura hatırlatması, gerçek iPhone'da açılış ve 5.6.1'den service worker güncellemesi.
+10. 5.8: gerçek iPhone'da açılış yenileme ve taşıma, kabuk zemininin rengi.
 
 ## Sıradaki olası işler
 

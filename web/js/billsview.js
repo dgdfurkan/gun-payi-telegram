@@ -136,7 +136,7 @@ export function openBill({ id = '', origin = '', type = 'diger', draft = null, o
   function dayChips(key, presets) {
     const list = d.bill[key], all = [...new Set([...presets, ...list])].sort((a, b) => a - b);
     return `<div class="picker-row">${all.map(n => `<button type="button" class="chip ${list.includes(n) ? 'on' : ''}" data-list="${key}" data-n="${n}">${n} gün</button>`).join('')}<button type="button" class="chip ${list.length ? '' : 'on'}" data-list="${key}" data-n="0">Yok</button></div>
-      <div class="rem-custom"><span class="rc-l">Özel</span><button type="button" class="rc-b" data-step="-1" aria-label="Azalt">${icon('minus')}</button><input type="number" inputmode="numeric" min="1" value="10" data-dn aria-label="Gün"><button type="button" class="rc-b" data-step="1" aria-label="Artır">${icon('plus')}</button><span class="rc-l">gün</span><button type="button" class="rc-add" data-add="${key}">Ekle</button></div>`;
+      <div class="rem-custom"><span class="rc-l">Özel</span><button type="button" class="rc-b" data-step="-1" aria-label="Azalt">${icon('minus')}</button><input type="number" inputmode="numeric" min="1" max="3650" value="10" data-dn aria-label="Gün"><button type="button" class="rc-b" data-step="1" aria-label="Artır">${icon('plus')}</button><span class="rc-l">gün</span><button type="button" class="rc-add" data-add="${key}">Ekle</button></div>`;
   }
   const body = () => `<div class="form">
     <div class="ed-head">${tile(catOf(d), 'lg')}<input class="title-input" value="${esc(d.title)}" data-f="title" aria-label="Fatura adı" enterkeyhint="done"></div>

@@ -4,6 +4,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { applyEvent, parseBackup, fresh } from '../web/js/store.js';
 import { itemsOn, jobsFor, remindersLabel, repeatLabel, cleanItem, patchOccurrence, zonedMs, dayAdd, dayAt, activeOn, occurrence, cycleDays, remDue } from '../web/js/core.js';
 import { VERSION } from '../web/js/version.js';
+import { readMove, checkLossless } from '../web/js/move.js';
+import { stepValue, holdDelay } from '../web/js/pickers.js';
 
 const item = (x = {}) => cleanItem({ id: 'a', title: 'Spor', date: '2026-11-18', time: '09:00', repeat: 'none', weekdays: [], ...x });
 
@@ -140,4 +142,34 @@ test('zamanlama: rastgele 1500 planda kaba hesapla birebir', () => {
     const got = new Set(jobsFor([it], { timeZone: tz }, now, 8).map(j => `${j.origin}@${j.due}`));
     assert.deepEqual([...got].sort(), [...want].sort(), JSON.stringify(it) + ' @' + new Date(now).toISOString());
   }
+});
+
+test('taşıma: planlar, faturalar, uzun not, ödeme bilgisi ve bağlantı kayıpsız', () => {
+  const bill = cleanItem({ id: 'b', title: 'Elektrik faturası', date: '2026-11-10', repeat: 'monthly', bill: { type: 'elektrik', from: 10, to: 15, before: [], after: [3] }, exceptions: { '2026-11-01': { status: 'done', doneOn: '2026-11-12' } } });
+  const state = { ...fresh(), items: [item({ reminders: ['M1', 43200] }), bill], notes: [{ id: 'n', text: 'x'.repeat(9000), createdAt: '2026-11-22T10:00:00Z', updatedAt: '2026-11-22T10:00:00Z' }] };
+  const link = { chatId: 42, secret: 'a'.repeat(64), name: 'Deneme', bot: 'TestBot', at: 5 };
+  const avatar = { img: 'data:image/jpeg;base64,AAAA', frame: 'gold' };
+  const text = JSON.stringify({ app: 'gun-payi', schema: 2, prefs: state.prefs, items: state.items, notes: state.notes, reviews: [], move: { v: 1, cursor: 17, link, avatar } });
+  assert.ok(checkLossless(text, state));
+  const back = parseBackup(text);
+  assert.deepEqual(back.items, state.items);
+  assert.equal(back.notes[0].text.length, 9000);
+  assert.deepEqual(readMove(JSON.parse(text)), { cursor: 17, link, avatar });
+  assert.equal(checkLossless(text, { ...state, items: [...state.items, bill] }), false, 'eksik veriyle taşıma başlamaz');
+});
+
+test('taşıma: panodan gelen zararlı alanlar alınmaz', () => {
+  const r = readMove({ move: { v: 1, cursor: -4, link: { chatId: '1"><b>', secret: 'kısa' }, avatar: { img: 'x" onerror="alert(1)', frame: '<svg>' } } });
+  assert.deepEqual(r, { cursor: 0, link: null, avatar: { frame: 'none' } });
+  assert.equal(readMove({ schema: 2, items: [] }), null);
+});
+
+test('artı eksi birer birer, basılı tutunca hızlanır', () => {
+  assert.deepEqual([1, 10, 20, 29, 999].map(v => stepValue(v, 1)), [2, 11, 21, 30, 1000]);
+  assert.deepEqual([30, 11, 2, 1].map(v => stepValue(v, -1)), [29, 10, 1, 1]);
+  assert.equal(stepValue(999, 1, 1, 999), 999);
+  let total = 0, steps = 0;
+  while (total < 2000) total += holdDelay(steps++);
+  assert.ok(steps > 40, `2 saniyede ${steps} adım`);
+  assert.ok(holdDelay(0) > holdDelay(10));
 });

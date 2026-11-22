@@ -14,6 +14,8 @@ function saveAvatar(v) {
   try { localStorage.setItem(KEY, JSON.stringify(v)); return true; } catch { return false; }
 }
 
+export const restoreAvatar = v => saveAvatar(v);
+
 // Her yerde aynı görünüm: fotoğraf varsa resim, yoksa adın baş harfi; seçilen çerçeve halkası.
 export function avatarHTML(cls = '') {
   const a = loadAvatar();

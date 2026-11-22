@@ -83,7 +83,7 @@ export function parseBackup(text) {
   let raw;
   try { raw = JSON.parse(String(text).trim()); } catch { throw Error('Panodaki metin geçerli bir yedek değil.'); }
   if (!raw || typeof raw !== 'object' || ![1, 2].includes(raw.schema) || !Array.isArray(raw.items)) throw Error('Bu bir Gün Payı yedeği değil.');
-  if (raw.items.length > 5000) throw Error('Yedek çok büyük.');
+  if (raw.items.length > 20000) throw Error('Yedek çok büyük.');
   const items = [], skipped = [];
   const seen = new Set();
   for (const r of raw.items) {
@@ -93,9 +93,9 @@ export function parseBackup(text) {
       items.push(cleanItem({ ...r, id }));
     } catch { skipped.push(r?.title || '?'); }
   }
-  const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter(n => n && typeof n.text === 'string' && n.text.trim()).slice(0, 5000).map(n => ({
+  const notes = (Array.isArray(raw.notes) ? raw.notes : []).filter(n => n && typeof n.text === 'string' && n.text.trim()).slice(0, 20000).map(n => ({
     id: typeof n.id === 'string' ? n.id.slice(0, 150) : uid(),
-    text: (n.tag && raw.schema === 1 ? `${n.text}${n.tag ? `\n#${n.tag}` : ''}` : n.text).slice(0, 4000),
+    text: (n.tag && raw.schema === 1 ? `${n.text}${n.tag ? `\n#${n.tag}` : ''}` : n.text).slice(0, 100000),
     createdAt: n.createdAt || new Date().toISOString(), updatedAt: n.updatedAt || n.createdAt || new Date().toISOString(),
   }));
   const reviews = (Array.isArray(raw.reviews) ? raw.reviews : []).filter(r => r && isDate(r.week)).map(r => ({

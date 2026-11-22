@@ -6,6 +6,8 @@ import { icon } from './icons.js';
 import { $, $$, esc, haptic, applyTheme } from './ui.js';
 import { renderPlan, planActs, bindSwipe, closeOpenRow } from './plan.js';
 import { openCompose, openItem } from './compose.js';
+import { openMove, installedApp, markRenewed } from './move.js';
+import { bindHold } from './pickers.js';
 import { renderNotes, renderReview, renderSettings, pageActs, onInput, onChange, prepareLink, linkState, watchLink, checkLinkNow, refreshStatus } from './pages.js';
 
 const TABS = [['plan', 'Plan'], ['notes', 'Notlar'], ['add', ''], ['review', 'Özet'], ['settings', 'Ayarlar']];
@@ -102,8 +104,11 @@ function paintWelcome() {
       <div class="feat">${icon('inbox')}<div><b>Veriler telefonunda</b><span>Hesap yok, şifre yok.</span></div></div>
       <div class="grow"></div>
       <input type="text" placeholder="Adın (isteğe bağlı)" data-w="name" enterkeyhint="go" autocomplete="given-name" value="${esc(get().prefs.name)}">
-      <button type="button" class="big-btn" data-act="w-next">Başla</button>
-      <button type="button" class="link" data-act="backup-paste">Eski uygulamadan yedeğim var</button>`;
+      ${installedApp()
+        ? `<button type="button" class="big-btn" data-act="backup-paste">${icon('copy')}Eski simgeden taşı</button>
+      <button type="button" class="link" data-act="w-next">İlk kez kuruyorum, başla</button>`
+        : `<button type="button" class="big-btn" data-act="w-next">Başla</button>
+      <button type="button" class="link" data-act="backup-paste">Eski uygulamadan yedeğim var</button>`}`;
   } else {
     const { info, err } = linkState();
     welcomeEl.innerHTML = `<div style="font-size:64px;line-height:1;color:#2aabee">${icon('tg').replace('class="i ', 'style="width:72px;height:72px" class="i ')}</div>
@@ -123,6 +128,7 @@ function welcome() {
 }
 async function finishWelcome() {
   await commit(s => { s.onboarded = true; });
+  if (installedApp()) markRenewed();
   welcomeEl?.remove();
   welcomeEl = null;
   render();
@@ -150,9 +156,15 @@ const welcomeActs = {
   ctx.day = today();
   shell();
   render();
-  subscribe(() => render());
+  subscribe(() => {
+    // Yedek ya da taşıma karşılama ekranından yüklendiyse karşılama biter
+    if (welcomeEl && get().onboarded) { welcomeEl.remove(); welcomeEl = null; }
+    render();
+  });
+  bindHold();
   api.onLinkChange(() => { render(); if (welcomeEl && api.link()) finishWelcome(); });
   if (!s.onboarded) welcome();
+  if (api.moving()) openMove();
   api.sync(true).then(r => { if (r) render(); });
   if ('serviceWorker' in navigator) {
     if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));

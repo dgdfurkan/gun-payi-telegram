@@ -42,3 +42,5 @@ Güncellik: **22 Kasım 2026**. Son istek, eski briefteki çelişen tercihin ön
 | Sınırlar kalksın (1 ay, 1 hafta, 28 gün önce) | Her sayı ve birim yazılabilir; saatsiz planda da çalışır. |
 | Faturalar: 10-15 arası her gün, ödeyince sus, sonraki ay yine, 15'inden 3 gün sonra bir daha | Faturalar ekranı, "Ödedim", bitişten sonra ek hatırlatma. |
 | Çift açılış ekranı olmasın | Uygulamanın yükleme animasyonu kaldırıldı. |
+| Siyah ekranda logo olmasın | Ayarlar → Açılış ekranını yenile; veriler taşınır. |
+| Artı eksi birer birer, basılı tutunca hızlı; dk, saat, gün | Bütün artı eksi alanlarında. |
