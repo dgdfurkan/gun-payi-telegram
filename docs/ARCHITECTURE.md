@@ -65,6 +65,7 @@ Senkron yalnız açılışta, değişiklikten 1,5 sn sonra ve uygulama öne geli
 - Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı/Ödedim/Çekildi** ve **Ertele**.
 - Ertele: menü açılır açılmaz sohbet süre bekler (`snoozeAwait`, 15 dk). Menü açık değilken de yalnız süre yazılırsa son hatırlatma, yanıtlanan mesaj varsa o ertelenir. Öncelik: yanıtlanan hatırlatma, en son açılan menü (Ertele / taslak menüsü), açık taslak, son hatırlatma. Süre her zaman basılan ya da yazılan andan sayılır (`parseUntil`).
 - Tekrar hatırlatma (`item.nag = {every, times}`): plan anında (ertelendiyse ertelenen anda) ve sonrasında. Alarm aynı gerçekleşmede gecikenlerden yalnız sonuncusunu gönderir; yenisi ulaşınca önceki mesajı siler (`msgs` türü `r`).
+- Hatırlatma mesajının son satırı aynı gerçekleşmenin sonraki hatırlatma saatleridir (`upcoming`: `jobsFor`, 60 gün, gönderilmemiş, şu andan sonra). Uygulamadan gelen saat, hatırlatma, tekrar ya da erteleme değişikliği canlı kartları yeniden yazar.
 - Alarm: `jobsFor` en yakın işi bulur, `storage.setAlarm`. Gönderilen iş kimlikleri 3 gün tutulur; başarısız gönderim 3 denemeden sonra bırakılır.
 
 ## API

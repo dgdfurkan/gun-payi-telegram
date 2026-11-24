@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { ReminderHub } from '../worker/index.js';
 import { webhookSecret } from '../worker/hub.js';
+import { nextLine } from '../worker/telegram.js';
 import { clockAt, fromMin, zonedMs, dayAt, hmAt, cleanItem, patchOccurrence, donePatch, makeSnooze } from '../web/js/core.js';
 import { applyEvent } from '../web/js/store.js';
 import { existsSync } from 'node:fs';
@@ -336,12 +337,15 @@ test('tamamlanmayan plan tekrar hatırlatılır, sohbette tek hatırlatma kalır
     await hub.alarm();
     const nags = () => t.calls.filter(c => c.method === 'sendMessage' && /Balıkların/.test(c.body.text));
     assert.equal(nags().length, 1, 'kaçırılan tekrarlar tek mesajda toplanır');
-    assert.equal(nags()[0].body.text, `🐾 <b>Balıkların suyu</b>\n${item.time}`, 'sade: yalnız iş ve saati');
+    const [head, next] = nags()[0].body.text.split('\n🔔 Sonraki: ');
+    assert.equal(head, `🐾 <b>Balıkların suyu</b>\n${item.time}`, 'sade: yalnız iş ve saati');
+    assert.equal(next.split(' · ').length, 3, 'kalan 3 tekrarın saati alt satırda');
     assert.ok(btn(nags()[0], 'Ertele'));
     at(base + 11 * 60000);
     await hub.alarm();
     assert.equal(nags().length, 2);
-    assert.equal(nags()[1].body.text, nags()[0].body.text, 'kaçıncı tekrar olduğu yazmaz');
+    assert.equal(nags()[1].body.text.split('\n')[1], item.time, 'kaçıncı tekrar olduğu yazmaz');
+    assert.equal(nags()[1].body.text.split('\n🔔 Sonraki: ')[1].split(' · ').length, 2, 'geçen saat listeden düşer');
     assert.ok(deleted(t).includes(nags()[0].id), 'önceki hatırlatma silinir');
     await press(t, btn(nags()[1], 'Tamamlandı'), nags()[1].id);
     at(base + 40 * 60000);
@@ -422,7 +426,12 @@ timed('erteleme basılan andan sayılır, tekrarlar da o andan yürür', async (
   assert.match(w.card().text, /Ertelendi: 20:35/);
   await w.run('2026-11-22', '23:00');
   assert.deepEqual(w.times(), ['10', '35', '45', '55'].map(m => `2026-11-22 20:${m}`).concat('2026-11-22 21:05'));
-  assert.ok(w.log.slice(1).every(x => x.text === '🐾 <b>Balıkları besle</b>\n20:35'), 'mesajda yeni saat yazar');
+  assert.deepEqual(w.log.slice(1).map(x => x.text), [
+    '🐾 <b>Balıkları besle</b>\n20:35\n🔔 Sonraki: 20:45 · 20:55 · 21:05',
+    '🐾 <b>Balıkları besle</b>\n20:35\n🔔 Sonraki: 20:55 · 21:05',
+    '🐾 <b>Balıkları besle</b>\n20:35\n🔔 Sonraki: 21:05',
+    '🐾 <b>Balıkları besle</b>\n20:35',
+  ], 'mesajda yeni saat; altında yalnız gelecek tekrarlar');
   const item = (await w.sync())[0];
   assert.equal(item.snooze.until, ist('2026-11-22', '20:35'));
 });
@@ -488,7 +497,9 @@ timed('erken hatırlatmayı ertelemek plan saatini yutmaz, çift de çalmaz', as
   await w.say('5 dk');
   await w.run('2026-11-22', '21:00');
   assert.deepEqual(w.times(), ['2026-11-22 20:00', '2026-11-22 20:06', '2026-11-22 20:10']);
-  assert.equal(w.log[1].text, '🐾 <b>Balıkları besle</b>\n20:10', 'plan saati değişmedi');
+  assert.equal(w.log[0].text, '🐾 <b>Balıkları besle</b>\n20:10\n🔔 Sonraki: 20:10', 'erken hatırlatmanın altında plan anı');
+  assert.equal(w.log[1].text, '🐾 <b>Balıkları besle</b>\n20:10\n🔔 Sonraki: 20:10', 'plan saati değişmedi');
+  assert.equal(w.log[2].text, '🐾 <b>Balıkları besle</b>\n20:10');
   w = await world('2026-11-22', '19:00', [fish({ reminders: [10, 0] })]);
   await w.run('2026-11-22', '20:00');
   await w.say('10 dk');
@@ -630,4 +641,31 @@ test('ekleme sayfası: önbelleğe girmez, güncel açılış görselini verir, 
   const dark = await (await t.call('/api/kur?koyu=1', { method: 'GET' })).text();
   assert.match(dark, /\/icons\/splash-koyu-750x1334\.png/);
   for (const [, p] of (html + dark).matchAll(/href="\/(icons\/[^"]+)"/g)) assert.ok(existsSync(new URL('../web/' + p, import.meta.url)), p);
+});
+
+timed('sonraki hatırlatmalar: faturada günler, ertelemede ve uygulamadaki değişiklikte güncellenir', async () => {
+  const bill = { id: 'b', title: 'Elektrik faturası', date: '2026-12-10', repeat: 'monthly', bill: { type: 'elektrik', from: 10, to: 15, before: [], after: [3] } };
+  let w = await world('2026-12-09', '19:00', [bill]);
+  await w.run('2026-12-10', '10:00');
+  assert.equal(w.last().text, '💡 <b>Elektrik faturası</b>\n10–15 Aralık\n🔔 Sonraki: Yarın, 12, 13, 14, 15, 18 Aralık · 09:00');
+  await w.run('2026-12-15', '10:00');
+  assert.equal(w.last().text, '💡 <b>Elektrik faturası</b>\n10–15 Aralık\n🔔 Sonraki: 18 Aralık 09:00', 'tek kalan gün');
+
+  w = await world('2026-11-22', '19:00', [fish({ nag: { every: 10, times: 3 } })]);
+  await w.run('2026-11-22', '20:10');
+  assert.equal(w.last().text, '🐾 <b>Balıkları besle</b>\n20:10\n🔔 Sonraki: 20:20 · 20:30 · 20:40');
+  await w.say('1 saat');
+  assert.equal(w.card().text, '🐾 <b>Balıkları besle</b>\n20:10\n⏰ Ertelendi: 21:10\n🔔 Sonraki: 21:20 · 21:30 · 21:40', 'ertelenince liste ertelenen andan');
+  await w.sync(list => list.map(i => cleanItem({ ...i, nag: { every: 5, times: 2 } })));
+  assert.equal(w.card().text, '🐾 <b>Balıkları besle</b>\n20:10\n⏰ Ertelendi: 21:10\n🔔 Sonraki: 21:15 · 21:20', 'uygulamada değişince kart da değişir');
+  await press(w.t, btn({ body: w.card() }, 'Değiştir'), w.last().id);
+  assert.equal(w.card().text, '🐾 <b>Balıkları besle</b>\n21:10\n🔔 Sonraki: 21:15 · 21:20\n\n<i>Süreye dokun ya da sohbete yaz: 45 dk, 3 saat, 1 gün</i>', 'menüde ertelenen an tekrar yazılmaz');
+});
+
+test('sonraki satırı: ay geçişi, aynı dakika tek, en fazla 6', () => {
+  const tz = 'Europe/Istanbul', d = (day, hm) => zonedMs(day, hm, tz);
+  assert.equal(nextLine([d('2026-11-30', '09:00'), d('2026-12-01', '09:00')], tz, '2026-11-28'), '\n🔔 Sonraki: 30 Kasım, 1 Aralık · 09:00');
+  assert.equal(nextLine([d('2026-11-28', '20:20'), d('2026-11-28', '20:20'), d('2026-11-29', '08:00')], tz, '2026-11-28'), '\n🔔 Sonraki: 20:20 · Yarın 08:00');
+  assert.equal(nextLine(Array.from({ length: 9 }, (_, i) => d('2026-11-28', `2${Math.floor(i / 6)}:${i % 6}0`)), tz, '2026-11-28'), '\n🔔 Sonraki: 20:00 · 20:10 · 20:20 · 20:30 · 20:40 · 20:50 +3');
+  assert.equal(nextLine([], tz, '2026-11-28'), '');
 });

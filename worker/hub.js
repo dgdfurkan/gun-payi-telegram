@@ -1,9 +1,9 @@
 // Durable Object. 'meta' örneği bağlantı kodlarını ve bot ayarını, 'chat:<id>' örnekleri
 // her kullanıcının plan aynasını, olay kuyruğunu ve hatırlatma alarmını tutar.
 import { DurableObject } from 'cloudflare:workers';
-import { jobsFor, cleanItem, cleanPrefs, dayAt, dayAdd, hmAt, whenAt, zonedMs, patchOccurrence, occurrence, statusOf, activeOn, donePatch, makeSnooze, snoozeOf, movedTo, readRem, monthRem, MINUTE, MAX_MINUTES, uid, weekday, toMin, fromMin } from '../web/js/core.js';
+import { jobsFor, cleanItem, cleanNag, cleanReminders, cleanPrefs, dayAt, dayAdd, hmAt, whenAt, zonedMs, patchOccurrence, occurrence, statusOf, activeOn, donePatch, makeSnooze, snoozeOf, movedTo, readRem, monthRem, MINUTE, MAX_MINUTES, uid, weekday, toMin, fromMin } from '../web/js/core.js';
 import { parse, toItem, parseDurations, parseClock, parseNag, parseSpan, parseUntil } from '../web/js/parse.js';
-import { tg, send, buttons, esc, HELP, reminderMessage, snoozedMessage, snoozeMenuMessage, reminderButtons, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
+import { tg, send, buttons, esc, HELP, reminderMessage, nextLine, snoozedMessage, snoozeMenuMessage, reminderButtons, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
 import { transcribe, aiParse } from './ai.js';
 
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -219,13 +219,22 @@ export class ReminderHub extends DurableObject {
     this.pushEvent({ type: 'patch', id: c.item.id, origin: c.origin, patch });
   }
   // Hatırlatma kartının o anki hâli: normal, menü açık ya da ertelenmiş
+  // Aynı gerçekleşme için şu andan sonra gelecek hatırlatmalar (gönderilmiş olanlar hariç)
+  upcoming(c, now, skip = 0) {
+    const dues = jobsFor([c.item], this.s.cal.prefs, now, 60)
+      .filter(j => j.origin === c.origin && j.due > now + 5000 && j.due !== skip && !this.s.sent[j.id])
+      .map(j => j.due);
+    return nextLine(dues, this.tz, dayAt(now, this.tz));
+  }
   reminderView(c, mode = '') {
     const prefs = this.s.cal.prefs, tz = this.tz, now = Date.now(), today = dayAt(now, tz), { o } = c;
     const z = snoozeOf(o), moved = movedTo(o, prefs);
     const waiting = !mode && z && z.until > now;
     const job = { title: o.title, icon: o.icon, bill: o.bill, date: o.date, end: o.end, time: o.time };
     if (moved && !waiting) { job.date = dayAt(moved, tz); job.time = hmAt(moved, tz); }
-    const text = waiting ? snoozedMessage(job, z.until, today, tz) : mode === 'snooze' ? snoozeMenuMessage(job, today) : reminderMessage(job, today);
+    // Ertelenen an zaten üstte yazıyor; listede tekrar edilmez
+    const next = this.upcoming(c, now, z && z.until > now ? z.until : 0);
+    const text = waiting ? snoozedMessage(job, z.until, today, tz) + next : mode === 'snooze' ? snoozeMenuMessage(job, today, next) : reminderMessage(job, today) + next;
     return { text, markup: reminderButtons(c.item.id, c.origin, { mode: waiting ? 'snoozed' : mode, bill: o.bill }) };
   }
   async paintReminder(c, mid, mode = '') {
@@ -240,11 +249,12 @@ export class ReminderHub extends DurableObject {
   // Uygulamadan yapılan erteleme Telegram'daki karta da yansır.
   snoozeChanges(before, after) {
     const out = new Map();
+    const shape = o => JSON.stringify([o.date, o.time, cleanReminders(o.reminders ?? null), cleanNag(o.nag), o.bill, snoozeOf(o)?.until || 0]);
     for (const [id, list] of Object.entries(this.s.msgs)) {
       for (const m of list) {
         if (m[3] !== 'r') continue;
         const was = this.pick(id, m[2], before), now = this.pick(id, m[2], after);
-        if (was && now && (snoozeOf(was.o)?.until || 0) !== (snoozeOf(now.o)?.until || 0)) out.set(`${id}:${now.origin}`, [id, now.origin]);
+        if (was && now && shape(was.o) !== shape(now.o)) out.set(`${id}:${now.origin}`, [id, now.origin]);
       }
     }
     return [...out.values()];
@@ -841,7 +851,7 @@ export class ReminderHub extends DurableObject {
       const c = this.pick(j.itemId, j.origin);
       if (!this.pending(c)) { s.sent[j.id] = now; continue; }
       if ((snoozeOf(c.o)?.until || 0) > now + 5000) continue;
-      await deliver(j.id, reminderMessage(j, today), reminderButtons(j.itemId, j.origin, { bill: j.bill }), j.itemId, c.tro, 'r');
+      await deliver(j.id, reminderMessage(j, today) + this.upcoming(c, now), reminderButtons(j.itemId, j.origin, { bill: j.bill }), j.itemId, c.tro, 'r');
     }
     for (const z of s.snooze.filter(x => x.test && x.due <= now + 5000)) {
       await deliver('z:' + z.id, '🔔 <b>Deneme hatırlatması</b>\nUygulama kapalıyken de buraya gelir.');

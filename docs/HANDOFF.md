@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **22 Kasım 2026**. Sürüm **5.8.0**. Canlıdaki sürüm: `GET /health`.
+Güncelleme: **22 Kasım 2026**. Sürüm **5.8.1**. Canlıdaki sürüm: `GET /health`.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,11 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.8.1
+
+- Telegram hatırlatmasının son satırı aynı gerçekleşmenin gelecek hatırlatmaları: `🔔 Sonraki: 20:20 · 20:30` (faturada `Yarın, 12, 13 Aralık · 09:00`, en fazla 6, sonra `+N`). Ayrı mesaj ya da düğme değildir. Ertelemede, Ertele menüsünde ve uygulamada saat/hatırlatma değişince kart yeniden yazılır (`upcoming`, `nextLine`).
+- `npm test`: 103 test.
 
 ## 5.8
 

@@ -1,5 +1,5 @@
 // Telegram Bot API yardımcıları ve mesaj biçimleri.
-import { dayAt, dayAdd, planOn, summary, repeatLabel, remindersLabel, nagShort, dayLabel, exactDay, whenAt, spanLabel, billRemindLabel, billSpan, monthKey, paidWord, DAY_NAMES, DAY_SHORT, shortDate, weekday, ALL_DAY } from '../web/js/core.js';
+import { dayAt, dayAdd, planOn, summary, repeatLabel, remindersLabel, nagShort, dayLabel, exactDay, whenAt, hmAt, daysBetween, MONTHS, spanLabel, billRemindLabel, billSpan, monthKey, paidWord, DAY_NAMES, DAY_SHORT, shortDate, weekday, ALL_DAY } from '../web/js/core.js';
 import { emojiOf } from '../web/js/categories.js';
 import { nagLabel } from '../web/js/parse.js';
 
@@ -45,8 +45,31 @@ export function reminderMessage(job, today) {
     : [job.date && !(job.time && job.date === today) ? exactDay(job.date, today) : '', job.time].filter(Boolean).join(' ');
   return `${icon} <b>${esc(job.title)}</b>${when ? `\n${when}` : ''}`;
 }
+// Bu hatırlatmadan sonra aynı plan için gelecek olanlar, sırayla ve saatle: "🔔 Sonraki: 20:20 · 20:30".
+// Ayrı bildirim değil, mesajın son satırıdır. Hepsi aynı saatteyse günler birlikte: "Yarın, 12, 13 Aralık · 09:00".
+export function nextLine(dues, tz, today, max = 6) {
+  const list = [...new Set(dues)].sort((a, b) => a - b).map(ms => ({ day: dayAt(ms, tz), hm: hmAt(ms, tz) }));
+  const seen = new Set(), uniq = list.filter(x => !seen.has(x.day + x.hm) && seen.add(x.day + x.hm));
+  if (!uniq.length) return '';
+  const shown = uniq.slice(0, max), more = uniq.length - shown.length;
+  const month = d => MONTHS[+d.slice(5, 7) - 1];
+  let text;
+  if (shown.length > 1 && shown.every(x => x.hm === shown[0].hm && x.day !== today)) {
+    text = shown.map((x, i) => {
+      if (daysBetween(today, x.day) === 1) return 'Yarın';
+      const next = shown[i + 1];
+      return `${+x.day.slice(8)}${!next || next.day.slice(0, 7) !== x.day.slice(0, 7) || daysBetween(today, next.day) === 1 ? ' ' + month(x.day) : ''}`;
+    }).join(', ') + ` · ${shown[0].hm}`;
+  } else {
+    text = shown.map(x => {
+      const diff = daysBetween(today, x.day);
+      return diff === 0 ? x.hm : diff === 1 ? `Yarın ${x.hm}` : `${+x.day.slice(8)} ${month(x.day)} ${x.hm}`;
+    }).join(' · ');
+  }
+  return `\n🔔 Sonraki: ${text}${more > 0 ? ` +${more}` : ''}`;
+}
 export const snoozedMessage = (job, until, today, tz) => `${reminderMessage(job, today)}\n⏰ Ertelendi: ${whenAt(until, tz, today)}`;
-export const snoozeMenuMessage = (job, today) => `${reminderMessage(job, today)}\n\n<i>Süreye dokun ya da sohbete yaz: 45 dk, 3 saat, 1 gün</i>`;
+export const snoozeMenuMessage = (job, today, next = '') => `${reminderMessage(job, today)}${next}\n\n<i>Süreye dokun ya da sohbete yaz: 45 dk, 3 saat, 1 gün</i>`;
 
 // Hatırlatma altındaki düğmeler: ana sıra, Ertele menüsü ya da ertelenmiş hâl
 export function reminderButtons(itemId, origin, { mode = 'main', bill = null } = {}) {
