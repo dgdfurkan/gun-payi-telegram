@@ -1,5 +1,5 @@
 // Uygulama kabuğunu önbellekler; kişisel veri IndexedDB'de kalır, burada silinmez.
-const VERSION = '5.8.1';
+const VERSION = '5.9.0';
 const CACHE = 'gp-' + VERSION;
 const FONTS = 'gp-fonts';
 const SHELL = [

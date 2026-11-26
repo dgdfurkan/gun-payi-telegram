@@ -41,14 +41,14 @@ IndexedDB `gun-payi` v1, store `local`, anahtar `state`:
 - **Plan:** `id, title, kind, date ('' = Yapılacaklar), time, endTime, repeat (none|daily|weekly|monthly|yearly), interval (her N), monthDay (kısa ayda kırpılan 29-31), weekdays, until, reminders, nag, bill, snooze, icon, status, exceptions{origin: {status,date,time,snooze,doneOn}}, note`.
 - **Hatırlatma değeri:** sayı = dakika (kesirli = saniye); `"M1"`, `"M1+4320"` = takvim ayı + dakika. `null` = saatli planda varsayılan, saatsiz planda yok. Saatsiz planın saati `prefs.allDayTime`.
 - **Erteleme:** `{until, at, for}`; tek seferlik planda `snooze`, tekrarlıda `exceptions[origin].snooze`. `for` o günkü tarih+saattir, plan taşınırsa erteleme geçersizleşir. `until` ≥ plan saati ise plan o ana taşınmış sayılır (saat ve tekrarlar oradan). Daha erkense yalnız `until`'e kadarki hatırlatmalar susar.
-- **Fatura:** `bill {type, from, to, before[], after[], auto}`, `repeat: monthly`, `interval` = ayda bir. Dönem anahtarı başladığı ayın `YYYY-MM-01`'i; ödeme `exceptions[anahtar] = {status:'done', doneOn}`. Hatırlatma: `before` gün önce, aralıkta her gün, bitişten `after` gün sonra.
+- **Fatura:** `bill {type, from, to, before[], after[], auto}` (`type`: `BILL_TYPES` anahtarı, grubu `BILL_GROUPS`; aynı türden birden çok kayıt olabilir), `repeat: monthly`, `interval` = ayda bir. Dönem anahtarı başladığı ayın `YYYY-MM-01`'i; ödeme `exceptions[anahtar] = {status:'done', doneOn}`. Hatırlatma: `before` gün önce, aralıkta her gün, bitişten `after` gün sonra.
 - Tekrarlayan planda tek günlük değişiklik `exceptions` içinde tutulur. Bitiş saati başlangıçtan küçükse ertesi güne taşar (16:00–01:00 vardiya).
 - `prefs`: `name, timeZone, reminderDefaults, allDayTime, plannerMode, digest{on,time}, reviewDay, color, mode`.
 - Telegram bağlantı anahtarı `localStorage['gp-link']` içindedir, yedeğe girmez.
 
 ## Senkron protokolü
 
-1. Uygulama `POST /api/sync {proto: 2, cursor, items, prefs}` gönderir. Aynada ya da kuyrukta 5.7 alanı varken `proto` göndermeyen eski önbellek reddedilir (alanları silerdi).
+1. Uygulama `POST /api/sync {proto: 3, cursor, items, prefs}` gönderir. Aynada ya da kuyrukta 5.7 alanı varken `proto` göndermeyen eski önbellek, 5.9 fatura türü varken `proto: 2` gönderen 5.8 uygulaması reddedilir (alanları silerdi ya da türü "Diğer"e çevirirdi).
 2. Sunucuda `cursor`'dan yeni olay varsa (Telegram/Kısayol ekledi, tamamlandı…) yalnız olayları döner; uygulama uygular, cursor'u ilerletir, tekrar gönderir.
 3. Olay kalmayınca sunucu plan aynasını değiştirir, alarmı yeniden kurar.
 
@@ -60,6 +60,7 @@ Senkron yalnız açılışta, değişiklikten 1,5 sn sonra ve uygulama öne geli
 - Webhook gizli başlığı tokendan türetilir; yalnız özel sohbet ve `from.id === chat.id` kabul edilir; `update_id` tekrarları atlanır.
 - Serbest metin/ses düğmeli **taslak** olur (`drafts`, 24 saat); `x:<id>:<işlem>` geri çağrıları gün/saat/hatırlatma/tekrarı düzenler, **Ekle** plana yazar. Taslak açıkken yalnız zaman içeren mesaj taslağı düzeltir.
 - Hatırlatma mesajı sadedir: emoji, iş, planın saati (başka günse gün etiketi). Not: başta `Not`/`Not al`/`Not olarak ekle` ya da sonda `not olarak ekle`, metin olduğu gibi saklanır. Göreli saat (`N dakika/saat sonra`) o anın üstüne eklenir.
+- Sürpriz zaman: "bu hafta hatırlat" gibi cümlede `parse` planla birlikte `surprise` döner; zaman `pickSlot` ile o anki planlara göre seçilir (sunucuda `s.cal.items`, uygulamada yerel planlar). Taslak `surprise` taşır; Ekle, Kısayol ve uygulama planla birlikte not olayı da yazar.
 - Çözümleme: önce `parse.js`; başlıkta anlaşılmayan zaman kelimesi kalırsa Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON şeması) yedeği. Saatsiz metin Yapılacaklar'a, `not:` ile başlayan nota gider.
 - Sesli mesaj: `getFile` → Whisper (`@cf/openai/whisper-large-v3-turbo`, `tr`) → aynı yol.
 - Komutlar: `/bugun`, `/yarin`, `/hafta`, `/tamam N`, `/not`, `/duraklat`, `/devam`. Hatırlatmada **Tamamlandı/Ödedim/Çekildi** ve **Ertele**.

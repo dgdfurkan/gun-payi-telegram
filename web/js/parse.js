@@ -1,6 +1,6 @@
 // Türkçe doğal dil çözümleyici: "her cuma 12'de babaannemi ara, 10 ve 15 dk önce hatırlat"
 // Kural tabanlıdır, ağ kullanmaz. Anlamadığı zamansal kelime kalırsa `doubt` doldurur.
-import { dayAt, clockAt, zonedMs, dayAdd, daysBetween, weekday, mondayOf, monthDays, addMonths, pad, makeRem, sortRems, readRem, MAX_MINUTES, MINUTE, DAY_MS, TZ_DEFAULT, BILL_TYPES, billTypeOf, newBill, billSpan, firstCycle } from './core.js';
+import { dayAt, clockAt, zonedMs, dayAdd, daysBetween, weekday, mondayOf, monthDays, addMonths, pad, makeRem, sortRems, readRem, MAX_MINUTES, MINUTE, DAY_MS, TZ_DEFAULT, BILL_TYPES, billTypeOf, newBill, billSpan, firstCycle, itemsOn, shortDate, DAY_NAMES } from './core.js';
 
 const B = '(?<![\\p{L}\\p{N}])';
 const E = '(?![\\p{L}\\p{N}])';
@@ -80,7 +80,7 @@ function reminderValue(numStr, half, unit) {
 }
 
 // ---------- Fatura cümlesi ----------
-const BILL_WORD = new RegExp(B + "(?:fatura\\p{L}*|kira(?![lz])\\p{L}*|aidat\\p{L}*|abone\\p{L}*|taksit\\p{L}*|ekstre\\p{L}*|ısınma\\p{L}*|doğal\\s?gaz\\p{L}*|kredi\\s+kartı\\p{L}*|netflix|spotify|icloud|chat\\s?gpt|çet\\s?gpt|claude|klod|clod|premium)" + E, 'u');
+const BILL_WORD = new RegExp(B + "(?:fatura\\p{L}*|kira(?![lz])\\p{L}*|aidat\\p{L}*|abone\\p{L}*|taksit\\p{L}*|ekstre\\p{L}*|ısınma\\p{L}*|doğal\\s?gaz\\p{L}*|kredi\\s+kartı\\p{L}*|(?:netfl[iı]x|spot[iı]f[aiy]|[iı]\\s?cloud|you\\s?tube|disney|hbo|blu\\s?tv|exxen|amazon|prime|apple|google\\s+one|gemini|microsoft|office\\s?365|adobe|playstation|ps\\s?plus|xbox|game\\s?pass|sigorta|kasko)\\p{L}*|chat\\s?gpt|çet\\s?gpt|claude|klod|clod|premium)" + E, 'u');
 const BILL_D = `(\\d{1,2}|${NUMW}|dörd)`;
 // Sıra ve hâl ekleri: 10'u, 15'ine, 8'inde, 6'sı, 2'sinde, onuna, beşinde
 const BILL_SUF = "((?:'?(?:(?:s?[iıuü])(?:n(?:de|da|den|dan|e|a|i|ı|u|ü)?)?|de|da|te|ta|den|dan|ten|tan|[iıuü]?nc[iıuü]))?)";
@@ -122,8 +122,87 @@ function findBill(t) {
   });
   t.each('(?:kendiliğinden|otomatik(?:\\s+olarak)?|otomatik\\s+ödeme\\p{L}*)(?:\\s+(?:çekiliyor|çekiyor|çekilir|çekilecek|ödeniyor|alınıyor))?|çekiliyor|çekiyor|çekilir|çekilecek|alınıyor', 'bill', () => { auto = true; });
   t.each('ödemez\\p{L}*|ödemediy\\p{L}*|ödemedim\\p{L}*|ödenmez\\p{L}*|bitince|bittikten', 'bill', () => {});
-  t.each('arası\\p{L}*|aralığ\\p{L}*|tarihleri\\p{L}*|tarihinde|günleri|ödeniyor|ödüyorum|geliyor|oluyor|var', 'bill', () => {});
+  t.each('arası\\p{L}*|aralığ\\p{L}*|tarihleri\\p{L}*|tarihinde|günleri|ödeniyor|ödüyorum|geliyor|oluyor|var|(?:para\\s+)?(?:gidiyor|çıkıyor|kesiliyor|yatıyor)', 'bill', () => {});
   return { from: days[0], to: days[1], auto, after, type: billTypeOf(t.s) };
+}
+
+// ---------- Sürpriz zaman: "bu hafta hatırlat", "önümüzdeki ay hatırlat", "haftaya çarşamba hatırlat" ----------
+// Gün belirsizse en sakin günü, saat belirsizse plansız bir saati seçerim; ayrıca not düşülür.
+const REMIND = /(?<![\p{L}])(?:hatırlat\p{L}*|haber\s+ver\p{L}*)/u;
+const NOT_DAY = `(?!\\s+(?:${DAY.slice(1, -1)}|bugün|yarın))`;
+const monthEnd = d => dayAdd(addMonths(d.slice(0, 8) + '01', 1), -1);
+const later = (a, b) => (a > b ? a : b);
+const VAGUE = [
+  // "bu hafta sonu"; çıplak "hafta sonu" yalnız hatırlat ile (yoksa her hafta sonu tekrarıdır)
+  [`(?<!her\\s)(?:(bu|gelecek|önümüzdeki|haftaya)\\s+)?hafta\\s*sonu(?:nda)?(?:\\s+bir\\s+ara)?`, (m, d) => {
+    const mon = dayAdd(mondayOf(d), m[1] && m[1] !== 'bu' ? 7 : 0);
+    return { from: later(dayAdd(mon, 5), d), to: dayAdd(mon, 6), loose: Boolean(m[1]) };
+  }],
+  ['(?:bu\\s+)?hafta\\s+sonuna\\s+kadar|bu\\s+hafta\\s+bitmeden', (m, d) => ({ from: d, to: dayAdd(mondayOf(d), 6) })],
+  ['(?:bu\\s+)?ay\\s+sonuna\\s+kadar|bu\\s+ay\\s+bitmeden', (m, d) => ({ from: d, to: monthEnd(d) })],
+  // "bu hafta içi" hafta içi günleri; "bu hafta içinde" bütün hafta
+  ['(bu|gelecek|önümüzdeki|haftaya)\\s+hafta\\s*içi', (m, d) => {
+    let mon = dayAdd(mondayOf(d), m[1] === 'bu' ? 0 : 7);
+    if (m[1] === 'bu' && d > dayAdd(mon, 4)) mon = dayAdd(mon, 7);
+    return { from: later(mon, d), to: dayAdd(mon, 4) };
+  }],
+  [`bu\\s+hafta(?:\\s+(?:içinde|boyunca|bir\\s+ara))?${NOT_DAY}`, (m, d) => ({ from: d, to: dayAdd(mondayOf(d), 6) })],
+  [`(?:haftaya|gelecek\\s+hafta|önümüzdeki\\s+hafta)(?:\\s+(?:içinde|boyunca|bir\\s+ara))?${NOT_DAY}`, (m, d) => ({ from: dayAdd(mondayOf(d), 7), to: dayAdd(mondayOf(d), 13) })],
+  ['bu\\s+ay(?:ın)?\\s+sonu(?:nda)?', (m, d) => ({ from: later(dayAdd(monthEnd(d), -6), d), to: monthEnd(d) })],
+  ['bu\\s+ay(?:\\s+(?:içinde|boyunca|bir\\s+ara))?', (m, d) => ({ from: d, to: monthEnd(d) })],
+  ['(?:gelecek|önümüzdeki)\\s+ay(?:ın)?\\s+(baş|orta|son)(?:ı|u|ında|unda|larında)', (m, d) => {
+    const first = addMonths(d.slice(0, 8) + '01', 1), last = monthEnd(first);
+    return { baş: { from: first, to: dayAdd(first, 6) }, orta: { from: dayAdd(first, 9), to: dayAdd(first, 19) }, son: { from: dayAdd(last, -6), to: last } }[m[1]];
+  }],
+  ['(?:gelecek|önümüzdeki)\\s+ay(?:\\s+(?:içinde|boyunca|bir\\s+ara))?', (m, d) => { const first = addMonths(d.slice(0, 8) + '01', 1); return { from: first, to: monthEnd(first) }; }],
+  ['(?:birkaç|bir\\s+iki|iki\\s+üç)\\s+gün\\s+içinde', (m, d) => ({ from: dayAdd(d, 1), to: dayAdd(d, 3) })],
+  [`(${NUM})\\s*(gün|hafta)\\s+içinde`, (m, d) => {
+    const n = wordNum(m[1]) * (m[2] === 'hafta' ? 7 : 1);
+    return n >= 1 && n <= 366 ? { from: d, to: dayAdd(d, n) } : null;
+  }],
+  ['bu\\s+günlerde|önümüzdeki\\s+günlerde|yakında|yakın\\s+(?:bir\\s+)?zamanda|bir\\s+ara|(?:müsait|uygun)\\s+bir\\s+(?:zaman|vakit|gün)\\p{L}*', (m, d) => ({ from: dayAdd(d, 1), to: dayAdd(d, 7) })],
+];
+// Gün dilimine göre saat aralığı (dakika). Dilim yoksa gündüz.
+const PERIOD_HOURS = { sabah: [510, 690], öğle: [720, 840], öğlen: [720, 840], 'öğleden sonra': [840, 1050], ikindi: [930, 1050], akşamüstü: [1020, 1140], 'akşam üstü': [1020, 1140], akşam: [1110, 1290], gece: [1290, 1410] };
+const DAY_HOURS = [600, 1230];
+
+// [from, to] günleri ve [start, end] dakikaları içinde en az planı olan gün, o gün planların 45 dk uzağında bir saat.
+// Aynı cümle aynı sonucu verir (önizleme ile kayıt aynı kalsın), bugün ancak başka gün yoksa seçilir.
+export function pickSlot({ from, to, start, end }, { items = [], now = Date.now(), tz = TZ_DEFAULT, seed = '' } = {}) {
+  const { day: today, minutes } = clockAt(now, tz);
+  const soonest = Math.ceil((minutes + 45) / 5) * 5;
+  let h = 2166136261;
+  for (const ch of `${seed}|${from}|${to}|${start}|${end}`) h = Math.imul(h ^ ch.codePointAt(0), 16777619);
+  const rand = () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+  from = later(from, today); to = later(to, from);
+  let days = [];
+  for (let d = from; d <= to && days.length < 400; d = dayAdd(d, 1)) days.push(d);
+  for (let tries = 0; tries < 8; tries++) {
+    const options = [];
+    for (const d of days) {
+      const slots = [];
+      for (let m = start; m <= end; m += 5) if (d !== today || m >= soonest) slots.push(m);
+      if (!slots.length) continue;
+      const plans = itemsOn(items, d).filter(o => o.status !== 'done');
+      const busy = plans.filter(o => o.time).map(o => [toMinutes(o.time) - 45, toMinutes(o.endTime || o.time) + 45]);
+      const free = slots.filter(m => !busy.some(([a, b]) => m >= a && m <= b));
+      options.push({ d, slots: free.length ? free : slots, load: plans.length + (free.length ? 0 : 50) + (d === today && days.length > 1 ? 100 : 0) });
+    }
+    if (options.length) {
+      const best = Math.min(...options.map(o => o.load));
+      const calm = options.filter(o => o.load === best);
+      const o = calm[Math.floor(rand() * calm.length)];
+      const m = o.slots[Math.floor(rand() * o.slots.length)];
+      return { date: o.d, time: `${pad(Math.floor(m / 60))}:${pad(m % 60)}` };
+    }
+    days = [dayAdd(days.at(-1), 1)]; // pencerede vakit kalmadı: ertesi gün
+  }
+  return { date: dayAdd(to, 1), time: `${pad(Math.floor(start / 60))}:${pad(start % 60)}` };
+}
+// Sürpriz zamanlı planın notu: zaman tam tarihle yazılır, "yarın" gibi kayan sözcük kalmaz.
+export function surpriseNote(title, date, time) {
+  const when = date ? `${shortDate(date)} ${DAY_NAMES[weekday(date)]}${time ? ' ' + time : ''}` : '';
+  return when ? `${title}\nHatırlatma: ${when}` : title;
 }
 
 export function parse(input, opts = {}) {
@@ -184,6 +263,15 @@ export function parse(input, opts = {}) {
 
   // 2b) Dönemsel fatura: gün aralığı saat aralığı sanılmadan önce okunur
   const bill = findBill(t);
+
+  // 2c) Belirsiz zaman penceresi: "bu hafta", "önümüzdeki ay", "bir ara" (tekrar ve tarih sanılmadan önce)
+  const remind = REMIND.test(t.s);
+  let vague = null;
+  if (!bill) for (const [pattern, fn] of VAGUE) t.each(pattern, 'vague', m => {
+    const w = !vague && fn(m, today);
+    if (!w || !(remind || w.loose)) return false;
+    vague = w;
+  });
 
   // 3) Tekrarlar
   const setWeekly = days => { out.repeat = 'weekly'; out.weekdays = [...new Set([...out.weekdays, ...days])]; found.repeat = true; };
@@ -324,9 +412,9 @@ export function parse(input, opts = {}) {
   });
 
   // 6) Yalnız gün dilimi: "yarın akşam", "cuma akşamı", "her sabah"
-  t.each(`${PERIOD}${PERIOD_SUF}`, 'period', (m, a) => {
+  t.each(`${PERIOD}${PERIOD_SUF}(?:\\s+(?:saat(?:ler)?(?:i|inde)|vakt(?:i|inde)|üzeri))?`, 'period', (m, a) => {
     const prev = t.before(a);
-    if (!prev || !['date', 'rep', 'time'].includes(prev)) return false;
+    if (!prev || !['date', 'rep', 'time', 'vague'].includes(prev)) return false;
     period = period || m[1];
   });
 
@@ -383,10 +471,29 @@ export function parse(input, opts = {}) {
   if (dateShift && found.date) out.date = dayAdd(out.date, dateShift);
   delete out._weekdayDate;
 
+  // 8b) Sürpriz zaman: "hatırlat" denip gün ya da saat açık bırakıldıysa ben seçerim
+  let window = null;
+  const canSurprise = remind && !bill && out.repeat === 'none' && !relative && !(Array.isArray(out.reminders) && !out.reminders.length);
+  // "1 gün önce hatırlat" günü belli plana hatırlatmadır, sürpriz değil
+  if (canSurprise && (vague || (found.date && hour === null && !found.reminders))) {
+    // Pencerede tek saat ya da aralık söylendiyse ("bu hafta 15'te", "akşam 7 ile 9 arası") o saatler içinde kalır
+    const hours = hour !== null ? [toMinutes(out.time), toMinutes(out.endTime || out.time)] : PERIOD_HOURS[period] || DAY_HOURS;
+    window = { from: vague ? vague.from : out.date, to: vague ? vague.to : out.date, start: hours[0], end: Math.max(hours[0], hours[1]) };
+    found.date = found.time = true;
+  } else if (vague && !found.date && out.repeat === 'none') {
+    // "bu hafta sonu pikniğe gidiyoruz": tekrar değil, o haftanın ilk günü
+    out.date = vague.from; found.date = true;
+  }
+
   // 9) Başlık
   out.title = cleanTitle(t.rest());
   // "arkadaşımın nişanı var" → "Arkadaşımın nişanı"
   if (found.date || found.time || found.repeat) out.title = out.title.replace(/(\S)\s+(?:var|olacak)$/iu, '$1');
+  if (window) {
+    const slot = pickSlot(window, { items: opts.items, now, tz, seed: out.title.toLocaleLowerCase('tr') });
+    Object.assign(out, { date: slot.date, time: slot.time, endTime: '', timeGuess: false, reminders: out.reminders ?? [0] });
+    out.surprise = { day: Boolean(vague), from: window.from, to: window.to };
+  }
   out.doubt = doubts(out.title, found);
   out.found = found;
   if (bill) applyBill(out, bill, today);
@@ -404,7 +511,9 @@ function applyBill(out, found, today) {
   }
   if (found.after.length) b.after = [...new Set(found.after)].sort((x, y) => x - y);
   // Başlık yalnız türün adından ibaretse ("Claude", "Elektrik") tam adını yaz
-  if (!out.title || (found.type !== 'diger' && !/\s/.test(out.title))) out.title = type.title;
+  // "Kasko" gibi kendi adı olan kayıt adını korur
+  const word = out.title.toLocaleLowerCase('tr').replace(/'.*$/u, '').slice(0, 4);
+  if (!out.title || (found.type !== 'diger' && !/\s/.test(out.title) && type.title.toLocaleLowerCase('tr').startsWith(word))) out.title = type.title;
   const interval = out.repeat === 'monthly' ? out.interval : out.repeat === 'yearly' ? out.interval * 12 : 1;
   Object.assign(out, { bill: b, repeat: 'monthly', interval, monthDay: 0, weekdays: [], reminders: null, nag: null, endTime: '', date: billSpan(b, firstCycle(b, today)).start, doubt: [] });
   Object.assign(out.found, { repeat: true, date: true });
@@ -466,21 +575,26 @@ export function cleanTitle(text) {
   // Fiil kalıpları: "aramam için gerekli olan şeyi" → "ara", "aramayı unutma" → "ara"
   s = s.replace(/\s+(?:için\s+)?(?:gerekli|gereken)\s+(?:olan\s+)?(?:şeyi|şeyleri|şey|hatırlatmayı|hatırlatıcıyı)/giu, ' için');
   s = s.replace(/(\p{L}{2,}?)(?:mam|mem|mamız|memiz|mamı|memi)\s+(?:için|lazım|gerek\p{L}*)(?![\p{L}])/giu, '$1');
-  s = s.replace(/(\p{L}{2,}?)(?:mayı|meyi)\s+unutma\p{L}*/giu, '$1');
+  s = s.replace(/(\p{L}{2,}?)(?:mayı|meyi)\s+(?:unutma\p{L}*|(?=(?:bana\s+)?hatırlat))/giu, '$1 ');
   s = s.replace(/(^|\s)(?:yiyeceğim|diyeceğim|gideceğim|edeceğim)(?![\p{L}])/giu, (m, a) => a + { yiyeceğim: 'ye', diyeceğim: 'de', gideceğim: 'git', edeceğim: 'et' }[m.trim().toLocaleLowerCase('tr')]);
   s = s.replace(/(\p{L}{2,}?)y?(?:acağım|eceğim|malıyım|meliyim)(?![\p{L}])/giu, '$1');
   s = s.replace(/(\p{L}{2,}?)(?:mak|mek)\s+(?:lazım|gerek\p{L}*|istiyorum)(?![\p{L}])/giu, '$1');
   s = s.replace(/\s+(?:ekler|ekleyebilir|ekleyiver|hatırlatır|hatırlatabilir|kurar|ayarlar)\s+m[iıuü]s[iıuü]n\s*\??/giu, ' ');
   s = s.replace(/\s+(?:bir\s+)?(?:hatırlatma|hatırlatıcı|alarm)\s+(?:kur|ekle|ayarla|oluştur)\p{L}*/giu, ' ');
-  const clauses = s.split(/[,;.!?]+/u).map(c => {
-    const words = c.trim().split(/\s+/).filter(Boolean);
-    const isFill = w => FILLER.has(w.toLocaleLowerCase('tr').replace(/[^\p{L}]/gu, ''));
+  // Ünlem ve soru işareti anlamın parçasıdır: "Ekmek al!", "Sınav var, unutma!" → "Sınav var!"
+  const parts = s.split(/([,;.!?]+)/u), clauses = [];
+  const isFill = w => FILLER.has(w.toLocaleLowerCase('tr').replace(/[^\p{L}]/gu, ''));
+  for (let i = 0; i < parts.length; i += 2) {
+    const words = parts[i].trim().split(/\s+/).filter(Boolean);
     while (words.length && isFill(words[0]) && !(words.length > 1 && KEEP_EDGE.has(words[0].toLocaleLowerCase('tr')) && !isFill(words[1]))) words.shift();
     while (words.length && isFill(words.at(-1)) && !(words.length > 1 && KEEP_EDGE.has(words.at(-1).toLocaleLowerCase('tr')) && !isFill(words.at(-2)))) words.pop();
-    if (words.length === 1 && KEEP_EDGE.has(words[0].toLocaleLowerCase('tr'))) return '';
-    return words.join(' ');
-  }).filter(Boolean);
-  let title = clauses.join(', ').replace(/\s+'/g, "'").replace(/^'+|'+$/g, '').replace(/^[^\p{L}\p{N}]+|[\s:–-]+$/gu, '').trim();
+    const text = words.length === 1 && KEEP_EDGE.has(words[0].toLocaleLowerCase('tr')) ? '' : words.join(' ');
+    const mark = (parts[i + 1] || '').replace(/[^!?]/g, '');
+    if (text) clauses.push(text + mark);
+    else if (mark && clauses.length && !/[!?]$/.test(clauses.at(-1))) clauses[clauses.length - 1] += mark;
+  }
+  let title = clauses.reduce((acc, c) => (!acc ? c : /[!?]$/.test(acc) ? `${acc} ${c[0].toLocaleUpperCase('tr')}${c.slice(1)}` : `${acc}, ${c}`), '');
+  title = title.replace(/\s+'/g, "'").replace(/^'+|'+$/g, '').replace(/^[^\p{L}\p{N}]+|[\s:–-]+$/gu, '').trim();
   if (title) title = title[0].toLocaleUpperCase('tr') + title.slice(1);
   return title;
 }

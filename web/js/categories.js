@@ -29,6 +29,12 @@ export const CATS = {
   mobile: { label: 'Hat', color: '#34c759', emoji: '📱', glyph: 'mobile', words: [] },
   home: { label: 'Ev', color: '#a2845e', emoji: '🏠', glyph: 'home', words: [] },
   sub: { label: 'Abonelik', color: '#8e5cf7', emoji: '🔄', glyph: 'sub', words: [] },
+  ai: { label: 'Yapay zekâ', color: '#10a37f', emoji: '🤖', glyph: 'sparkle', words: [] },
+  tv: { label: 'Dizi, film', color: '#ff3b30', emoji: '📺', glyph: 'tv', words: [] },
+  music: { label: 'Müzik', color: '#1db954', emoji: '🎵', glyph: 'music', words: [] },
+  cloud: { label: 'Depolama', color: '#0a84ff', emoji: '☁️', glyph: 'cloud', words: [] },
+  game: { label: 'Oyun', color: '#5e5ce6', emoji: '🎮', glyph: 'game', words: [] },
+  shield: { label: 'Sigorta', color: '#30b0c7', emoji: '🛡️', glyph: 'shield', words: [] },
   gift: { label: 'Hediye', color: '#ff2d55', emoji: '🎁', glyph: 'gift', words: ['hediye'] },
 };
 const B = '(?<![\\p{L}])';

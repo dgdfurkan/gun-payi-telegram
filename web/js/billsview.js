@@ -1,5 +1,5 @@
 // Faturalar: ödenecekler, ödenenler ve dönem düzenleyici.
-import { cleanItem, uid, occurrence, openBills, patchOccurrence, donePatch, addMonths, monthKey, monthsBetween, daysBetween, isCycle, billSpan, firstCycle, newBill, cycleDays, spanLabel, billLabel, periodName, paidWord, shortDate, zonedMs, BILL_TYPES } from './core.js';
+import { cleanItem, uid, occurrence, openBills, patchOccurrence, donePatch, addMonths, monthKey, monthsBetween, daysBetween, isCycle, billSpan, firstCycle, newBill, cycleDays, spanLabel, billLabel, periodName, paidWord, shortDate, zonedMs, BILL_TYPES, BILL_GROUPS, freshBillTitle } from './core.js';
 import { get, commit, subscribe } from './store.js';
 import { icon } from './icons.js';
 import { $, esc, haptic, toast, sheet, actions, confirmDanger } from './ui.js';
@@ -67,8 +67,12 @@ export function openBillList() {
         ? `<div class="bill-sum">${icon(due.length ? 'bill' : 'check')}<div><b>${due.length ? `${due.length} Ödeme Bekliyor` : 'Bekleyen Ödeme Yok'}</b><span>Ödedim dediğin dönem susar, sonraki dönemde yeniden başlar.</span></div></div>`
         : `<div class="empty"><div class="em-ic">${icon('bill')}</div><b>Faturalarını bir kez gir</b>Net gün ya da aralık seç. Ödeyene kadar Telegram’dan hatırlatırım.</div>`}
       ${section('Ödenecekler', due)}${section('Sıradaki dönem', next)}${section('Son ödenenler', paid)}
-      <div class="section-h">Fatura ekle</div>
-      <div class="bill-types">${Object.entries(BILL_TYPES).map(([k, v]) => `<button type="button" class="ico" data-b="new" data-type="${k}">${tile(v.cat)}<span>${v.label}</span></button>`).join('')}</div>
+      ${BILL_GROUPS.map(([g, label], i) => `<div class="section-h">${i ? label : `Fatura ekle · ${label}`}</div>
+      <div class="bill-types">${Object.entries(BILL_TYPES).filter(([, v]) => v.group === g).map(([k, v]) => {
+        const n = items.filter(x => x.bill.type === k).length;
+        return `<button type="button" class="ico" data-b="new" data-type="${k}">${tile(v.cat)}${n ? `<em aria-label="${n} kayıt">${n}</em>` : ''}<span>${v.label}</span></button>`;
+      }).join('')}</div>`).join('')}
+      <p class="section-f bt-f">Aynı türden birden fazla ekleyebilirsin: iki telefon hattı, iki ChatGPT hesabı gibi. Adı ayırt etsin.</p>
     </div>`;
   };
   const sh = sheet({ title: 'Faturalar', left: 'Kapat', body: body(), onClose: () => off() });
@@ -94,6 +98,7 @@ export function openBillList() {
 }
 
 const BEFORE = [1, 2, 3, 7], AFTER = [1, 2, 3, 5, 7];
+const sameHint = type => (type === 'telefon' ? '“İş hattı”, “Annemin hattı”' : BILL_TYPES[type].group === 'dijital' ? '“İş hesabı”, “Annemin hesabı”' : BILL_TYPES[type].group === 'ev' ? '“Yazlık”, “Annemin evi”' : '“İkinci kart”, “Arabanın kaskosu”');
 
 // id: düzenle · type: yeni · draft: ekleme panelinde söylenen fatura
 export function openBill({ id = '', origin = '', type = 'diger', draft = null, onSaved = null } = {}) {
@@ -101,10 +106,12 @@ export function openBill({ id = '', origin = '', type = 'diger', draft = null, o
   if (id && !saved?.bill) return null;
   const t = today();
   let d = saved ? structuredClone(saved) : {
-    id: uid(), title: draft?.title || BILL_TYPES[type].title, icon: draft?.icon || '', time: draft?.time || '', note: '',
+    id: uid(), title: draft?.title || freshBillTitle(type, get().items), icon: draft?.icon || '', time: draft?.time || '', note: '',
     interval: draft?.interval || 1, bill: draft?.bill ? structuredClone(draft.bill) : newBill(type, 10, BILL_TYPES[type].auto ? 10 : 15),
   };
   let range = d.bill.from !== d.bill.to, anchor = null, open = '';
+  // Aynı türden ikinci kayıt: adı ayırt edici olsun diye ipucu
+  const same = saved ? 0 : get().items.filter(i => i.bill?.type === d.bill.type).length;
   // Kullanıcı hatırlatma günlerine dokunmadıkça varsayılanlar seçime göre değişir.
   let ownDays = Boolean(saved || draft);
   const daysTouched = () => !saved || d.bill.from !== saved.bill.from || d.bill.to !== saved.bill.to;
@@ -140,6 +147,7 @@ export function openBill({ id = '', origin = '', type = 'diger', draft = null, o
   }
   const body = () => `<div class="form">
     <div class="ed-head">${tile(catOf(d), 'lg')}<input class="title-input" value="${esc(d.title)}" data-f="title" aria-label="Fatura adı" enterkeyhint="done"></div>
+    ${same ? `<p class="section-f same-f">Zaten ${same} ${esc(BILL_TYPES[d.bill.type].label)} kaydın var. Adı ayırt etsin: ${sameHint(d.bill.type)} gibi.</p>` : ''}
     ${period ? `<button type="button" class="big-btn ${period.status === 'done' ? 'soft' : ''}" data-x="paid">${icon(period.status === 'done' ? 'undo' : 'check')}${esc(spanLabel(period.date, period.end))} · ${period.status === 'done' ? 'Geri al' : paidWord(period.bill)}</button>` : ''}
     <div class="section-h">Ödeme günleri</div>
     <div class="group pad">

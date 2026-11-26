@@ -80,7 +80,7 @@ export function sync(now = false) {
     try {
       for (let i = 0; i < 6; i++) {
         const s = get();
-        const r = await call('sync', { body: { proto: 2, cursor: s.sync.cursor || 0, items: s.items, prefs: s.prefs } });
+        const r = await call('sync', { body: { proto: 3, cursor: s.sync.cursor || 0, items: s.items, prefs: s.prefs } });
         if (r.events?.length) {
           await commit(d => { for (const e of r.events) applyEvent(d, e); d.sync.cursor = r.cursor; });
           continue;

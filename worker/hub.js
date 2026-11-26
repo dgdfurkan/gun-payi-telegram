@@ -2,7 +2,7 @@
 // her kullanıcının plan aynasını, olay kuyruğunu ve hatırlatma alarmını tutar.
 import { DurableObject } from 'cloudflare:workers';
 import { jobsFor, cleanItem, cleanNag, cleanReminders, cleanPrefs, dayAt, dayAdd, hmAt, whenAt, zonedMs, patchOccurrence, occurrence, statusOf, activeOn, donePatch, makeSnooze, snoozeOf, movedTo, readRem, monthRem, MINUTE, MAX_MINUTES, uid, weekday, toMin, fromMin } from '../web/js/core.js';
-import { parse, toItem, parseDurations, parseClock, parseNag, parseSpan, parseUntil } from '../web/js/parse.js';
+import { parse, toItem, parseDurations, parseClock, parseNag, parseSpan, parseUntil, surpriseNote } from '../web/js/parse.js';
 import { tg, send, buttons, esc, HELP, reminderMessage, nextLine, snoozedMessage, snoozeMenuMessage, reminderButtons, addedMessage, dayList, inboxList, digestMessage, draftView } from './telegram.js';
 import { transcribe, aiParse } from './ai.js';
 
@@ -11,7 +11,10 @@ export const sha = async s => hex(await crypto.subtle.digest('SHA-256', new Text
 const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 const randomCode = n => [...crypto.getRandomValues(new Uint8Array(n))].map(x => ABC[x % ABC.length]).join('');
 // Eski önbellekten açılan uygulama (senkron sürümü 1) bu alanları tanımaz ve aynadan silerdi.
-const SYNC_PROTO = 2;
+// Senkron 2 (5.9 öncesi) yeni fatura türlerini tanımaz, "Diğer"e çevirirdi.
+const SYNC_PROTO = 3;
+const OLD_BILLS = new Set(['elektrik', 'dogalgaz', 'su', 'isinma', 'internet', 'telefon', 'kira', 'aidat', 'chatgpt', 'claude', 'kart', 'abonelik', 'diger']);
+const newBillType = b => Boolean(b && !OLD_BILLS.has(b.type));
 const isNewKind = i => Boolean(i.bill || i.snooze || i.monthDay || i.interval > 1 || i.repeat === 'yearly'
   || i.reminders?.some(v => monthRem(v) || v > 40320) || i.reminders?.length > 6
   || (i.nag && (i.nag.every > 1440 || i.nag.times > 20))
@@ -152,7 +155,9 @@ export class ReminderHub extends DurableObject {
     const cursor = Math.min(Number(body.cursor) || 0, s.seq);
     const pending = s.events.filter(e => e.seq > cursor);
     if (!(body.proto >= SYNC_PROTO)) {
-      const newer = s.cal.items.some(isNewKind) || pending.some(e => (e.type === 'add' && isNewKind(e.item)) || (e.type === 'patch' && ('snooze' in e.patch || 'doneOn' in e.patch)));
+      const newer = body.proto >= 2
+        ? s.cal.items.some(i => newBillType(i.bill)) || pending.some(e => (e.type === 'add' && newBillType(e.item.bill)) || (e.type === 'patch' && newBillType(e.patch.bill)))
+        : s.cal.items.some(isNewKind) || pending.some(e => (e.type === 'add' && isNewKind(e.item)) || (e.type === 'patch' && ('snooze' in e.patch || 'doneOn' in e.patch)));
       if (newer) throw Error('Gün Payı güncellendi. Uygulamayı kapatıp yeniden aç.');
     }
     if (pending.length) return { events: pending, cursor: s.seq };
@@ -403,7 +408,7 @@ export class ReminderHub extends DurableObject {
   // Serbest metni plana çevirir: önce kurallar, şüphe kalırsa AI.
   async understand(text) {
     const now = Date.now(), tz = this.tz;
-    let r = parse(text, { now, tz });
+    let r = parse(text, { now, tz, items: this.s.cal.items });
     let ai = false;
     if ((r.doubt.length || !r.title) && this.env.AI) {
       const a = await aiParse(this.env, text, { now, tz, fallback: r });
@@ -429,9 +434,16 @@ export class ReminderHub extends DurableObject {
     const item = cleanItem(toItem(r));
     s.cal.items.push(item);
     this.pushEvent({ type: 'add', item });
+    const noted = r.surprise ? this.noteSurprise(item) : null;
     await this.save('cal', 'events', 'seq');
     await this.schedule();
-    return { item, ai };
+    return { item, ai, noted };
+  }
+  // "Bu hafta hatırlat": zamanı ben seçtiysem iş ayrıca notlara yazılır
+  noteSurprise(item) {
+    const note = { id: uid(), text: surpriseNote(item.title, item.date, item.time).slice(0, 4000), createdAt: new Date().toISOString() };
+    this.pushEvent({ type: 'note', note });
+    return note;
   }
 
   async quick(text) {
@@ -448,7 +460,7 @@ export class ReminderHub extends DurableObject {
     const res = await this.addText(text);
     if (res.note) return { text: `📝 Not eklendi: ${res.note.text}` };
     const plain = addedMessage(res.item, today, res.ai, this.s.cal.prefs).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    return { text: plain };
+    return { text: plain + (res.noted ? '\n📝 Notlara da yazıldı' : '') };
   }
 
   // ---------- Telegram ----------
@@ -512,7 +524,7 @@ export class ReminderHub extends DurableObject {
         return;
       }
       if (!r.title) throw Error('Ne ekleyeceğimi anlayamadım.');
-      const draft = { id: uid(), item: cleanItem(toItem(r)), at: now, voice: voice ? text : '', ai, mid: 0 };
+      const draft = { id: uid(), item: cleanItem(toItem(r)), at: now, voice: voice ? text : '', ai, mid: 0, surprise: r.surprise ? (r.surprise.day ? 'day' : 'time') : '' };
       s.drafts[draft.id] = draft;
       this.track('draft:' + draft.id, userMid);
       await this.showDraft(draft, 'main', true);
@@ -591,6 +603,7 @@ export class ReminderHub extends DurableObject {
       const item = cleanItem({ ...it, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       s.cal.items.push(item);
       this.pushEvent({ type: 'add', item });
+      const noted = d.surprise ? this.noteSurprise(item) : null;
       delete s.drafts[id];
       // Sohbet sade kalsın: senin mesajın, düzeltmeler ve ara cevaplar silinir; plan başına tek kart kalır.
       const extra = (s.msgs['draft:' + id] || []).filter(m => m[0] !== d.mid);
@@ -599,7 +612,7 @@ export class ReminderHub extends DurableObject {
       await this.save('cal', 'events', 'seq', 'drafts', 'msgs');
       await this.schedule();
       await answer('Eklendi ✓');
-      await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: addedMessage(item, today, false, s.cal.prefs), parse_mode: 'HTML', reply_markup: buttons([[['↩︎ Geri al', `u:${item.id}`]]]) }).catch(() => {});
+      await tg(this.env, 'editMessageText', { chat_id: this.chatId, message_id: d.mid, text: addedMessage(item, today, false, s.cal.prefs) + (noted ? '\n📝 Notlara da yazıldı' : ''), parse_mode: 'HTML', reply_markup: buttons([[['↩︎ Geri al', noted ? `u:${item.id}:${noted.id}` : `u:${item.id}`]]]) }).catch(() => {});
       for (const [mid] of extra) await this.dropMessage(mid);
       return;
     }
@@ -755,9 +768,9 @@ export class ReminderHub extends DurableObject {
       return this.paintReminder(plan, mid, menu ? 'snooze' : '');
     }
     if (k === 'u') {
-      const item = s.cal.items.find(x => x.id === a);
       s.cal.items = s.cal.items.filter(x => x.id !== a);
       this.pushEvent({ type: 'remove', id: a });
+      if (b) this.pushEvent({ type: 'removeNote', id: b }); // sürpriz zamanla birlikte düşen not
       await this.save('cal', 'events', 'seq');
       await this.schedule();
       await answer('Geri alındı');

@@ -1,5 +1,5 @@
 // Ekleme (doğal dil + ses), plan düzenleme, erteleme ve not sayfaları.
-import { parse, toItem, parseUntil } from './parse.js';
+import { parse, toItem, parseUntil, surpriseNote } from './parse.js';
 import { cleanItem, dayAdd, dayLabel, repeatLabel, remindersLabel, billRemindLabel, nagShort, weekday, uid, activeOn, occurrence, patchOccurrence, donePatch, shortDate, statusOf, zonedMs, baseTime, makeSnooze, snoozeOf, whenAt, sortRems, MINUTE, DAY_NAMES } from './core.js';
 import { get, commit } from './store.js';
 import { icon } from './icons.js';
@@ -11,7 +11,7 @@ import { catOf } from './categories.js';
 import { openBill } from './billsview.js';
 import { calendarHTML, shiftMonth, quickDays, wheelHTML, bindWheel, reminderHTML, withTypedReminder, nagHTML, applyNag, isNagButton, handleCustom, toggleReminder, repeatHTML, applyRepeat, intervalOf, toggleWeekday, snoozeHTML, paintSnooze, tile, iconGridHTML } from './pickers.js';
 
-const EXAMPLES = [["Her cuma 12'de babaannemi ara", 'phone'], ["Yarın 9'da spor, 10 dk önce", 'run'], ['Elektrik faturası her ayın 10’u ile 15’i arası', 'bolt'], ['24 Nisan’da nişan, 1 ay önce hatırlat', 'cake'], ['Hafta içi 07:30 ilaç', 'pill'], ['Her gün 21:00 kitap oku', 'book'], ['Ekmek al', 'cart']];
+const EXAMPLES = [["Her cuma 12'de babaannemi ara", 'phone'], ["Yarın 9'da spor, 10 dk önce", 'run'], ['Elektrik faturası her ayın 10’u ile 15’i arası', 'bolt'], ['24 Nisan’da nişan, 1 ay önce hatırlat', 'cake'], ['Hafta içi 07:30 ilaç', 'pill'], ['Kedinin kumunu değiştir, bu hafta hatırlat', 'sparkle'], ['Her gün 21:00 kitap oku', 'book'], ['Ekmek al', 'cart']];
 const whenLabel = (p, t) => (p.repeat !== 'none' ? repeatLabel(p) : p.date ? dayLabel(p.date, t) : 'Yapılacaklar');
 // Saatsiz planda varsayılan "10 dk önce" geçmez; istenen hatırlatma geçer.
 const remOf = p => p.reminders ?? (p.time ? get().prefs.reminderDefaults : []);
@@ -59,7 +59,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
     ex.hidden = Boolean(value);
     if (st.kind === 'note' || !value) { st.parsed = null; pv.innerHTML = ''; closePicker(); return; }
     const prev = current();
-    if (st.aiFor !== value) { st.ai = false; st.parsed = parse(value, { tz: tz() }); }
+    if (st.aiFor !== value) { st.ai = false; st.parsed = parse(value, { tz: tz(), items: get().items }); }
     if (!st.parsed.date && !st.parsed.time && st.parsed.repeat === 'none' && day && !st.locks.date) st.parsed.date = day;
     if (st.parsed.kind === 'note' && !st.locks.kind) { setKind('note', false); return; }
     renderPreview(prev, flash);
@@ -68,7 +68,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       aiTimer = setTimeout(async () => {
         try {
           const { result } = await aiParse(value, tz());
-          if (result?.title && ta.value.trim() === value) { st.parsed = { ...st.parsed, ...result, reminders: st.parsed.reminders ?? result.reminders }; st.ai = true; st.aiFor = value; renderPreview(null, true); }
+          if (result?.title && ta.value.trim() === value) { st.parsed = { ...st.parsed, ...result, reminders: st.parsed.reminders ?? result.reminders, surprise: null }; st.ai = true; st.aiFor = value; renderPreview(null, true); }
         } catch { /* kural sonucu kalır */ }
       }, 900);
     }
@@ -92,6 +92,7 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
       if (p.date) chips.push(chip('remind', 'bell', rem.length ? remindersLabel(rem, !p.time) : p.time ? 'Hatırlatma yok' : 'Hatırlatma ekle', `${rem.length ? '' : 'off'} ${fl('reminders')}`));
       if (p.date && p.nag) chips.push(chip('remind', 'again', nagShort(p.nag), fl('nag')));
     }
+    if (p.surprise) chips.push(`<span class="chip ai">${icon('sparkle')}${'time' in st.over || 'date' in st.over ? '' : p.surprise.day ? 'Gün ve saat benden · ' : 'Saat benden · '}Nota da yazılır</span>`);
     if (st.ai) chips.push(`<span class="chip ai">${icon('sparkle')}AI</span>`);
     pv.innerHTML = `<div class="pv-title"><button type="button" class="pv-ico" data-pick="icon" aria-label="İkon seç">${tile(key)}</button><span>${esc(p.title || '…')}</span></div><div class="chips">${chips.join('')}</div>`;
   }
@@ -220,14 +221,16 @@ export function openCompose({ day = '', text = '', kind = 'plan' } = {}) {
     if (!p?.title) { toast('Ne ekleyeceğimi anlamadım, biraz daha yaz.'); return; }
     let item;
     try { item = cleanItem(toItem({ ...p, icon: st.over.icon || '' })); item.icon = st.over.icon || ''; } catch (e) { toast(e.message); return; }
-    await commit(s => { s.items.push(item); });
+    // "Bu hafta hatırlat": zamanı ben seçtim, iş ayrıca notlarda dursun
+    const note = p.surprise ? { id: uid(), text: surpriseNote(item.title, item.date, item.time), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } : null;
+    await commit(s => { s.items.push(item); if (note) s.notes.unshift(note); });
     haptic('success');
     ctx.enter = item.id;
     if (item.date && ctx.tab === 'plan' && ctx.mode === 'day' && item.repeat === 'none') ctx.day = item.date;
     sh.close();
     ctx.render();
     setTimeout(() => { ctx.enter = null; }, 700);
-    toast(`Eklendi · ${whenLabel(item, today())}${item.time ? ' ' + item.time : ''}`, { label: 'Geri al', run: () => commit(s => { s.items = s.items.filter(i => i.id !== item.id); }).then(() => sync()) });
+    toast(`Eklendi · ${whenLabel(item, today())}${item.time ? ' ' + item.time : ''}${note ? ' · nota da yazıldı' : ''}`, { label: 'Geri al', run: () => commit(s => { s.items = s.items.filter(i => i.id !== item.id); if (note) s.notes = s.notes.filter(n => n.id !== note.id); }).then(() => sync()) });
     sync();
   }
 

@@ -2,25 +2,47 @@
 // ödeme günleri değişse de "Kasım ödendi" bilgisi kaybolmaz.
 import { isDate, dayAdd, daysBetween, addMonths, monthsBetween, monthKey, monthSuffix, shortDate, MONTHS } from './dates.js';
 
-// cat: ikon/emoji kategorisi (categories.js)
+// cat: ikon/emoji kategorisi (categories.js). Sıra önemlidir: ilk eşleşen tür seçilir ("Apple iCloud" → iCloud).
+// Aynı türden birden çok kayıt olabilir (iki telefon hattı, iki ChatGPT hesabı); ayrımı başlık yapar.
+export const BILL_GROUPS = [['ev', 'Ev ve hat'], ['dijital', 'Dijital abonelikler'], ['odeme', 'Ödemeler ve diğer']];
 export const BILL_TYPES = {
-  elektrik: { label: 'Elektrik', title: 'Elektrik faturası', cat: 'power', match: /elektri[kğ]/u },
-  dogalgaz: { label: 'Doğalgaz', title: 'Doğalgaz faturası', cat: 'flame', match: /doğal\s*gaz|dogalgaz/u },
-  su: { label: 'Su', title: 'Su faturası', cat: 'water', match: /(?<![\p{L}])su(?![\p{L}])/u },
-  isinma: { label: 'Isınma', title: 'Isınma bedeli', cat: 'flame', match: /ısınma|merkezi ısı/u },
-  internet: { label: 'Ev interneti', title: 'Ev interneti faturası', cat: 'wifi', match: /internet/u },
-  telefon: { label: 'Telefon', title: 'Telefon faturası', cat: 'mobile', match: /telefon|gsm/u },
-  kira: { label: 'Kira', title: 'Kira', cat: 'home', match: /(?<![\p{L}])kira(?![lz])/u },
-  aidat: { label: 'Aidat', title: 'Aidat', cat: 'home', match: /aidat/u },
-  chatgpt: { label: 'ChatGPT', title: 'ChatGPT aboneliği', cat: 'sub', auto: true, match: /chat\s*gpt|çet\s*gpt/u },
-  claude: { label: 'Claude', title: 'Claude aboneliği', cat: 'sub', auto: true, match: /claude|klod|clod/u },
-  kart: { label: 'Kredi kartı', title: 'Kredi kartı ödemesi', cat: 'pay', match: /kredi\s*kart|ekstre/u },
-  abonelik: { label: 'Abonelik', title: 'Abonelik', cat: 'sub', auto: true, match: /abone|netflix|spotify|icloud|premium/u },
-  diger: { label: 'Diğer', title: 'Fatura', cat: 'pay', match: /(?!)/u },
+  elektrik: { group: 'ev', label: 'Elektrik', title: 'Elektrik faturası', cat: 'power', match: /elektri[kğ]/u },
+  dogalgaz: { group: 'ev', label: 'Doğalgaz', title: 'Doğalgaz faturası', cat: 'flame', match: /doğal\s*gaz|dogalgaz/u },
+  su: { group: 'ev', label: 'Su', title: 'Su faturası', cat: 'water', match: /(?<![\p{L}])su(?![\p{L}])/u },
+  isinma: { group: 'ev', label: 'Isınma', title: 'Isınma bedeli', cat: 'flame', match: /ısınma|merkezi ısı/u },
+  internet: { group: 'ev', label: 'Ev interneti', title: 'Ev interneti faturası', cat: 'wifi', match: /internet/u },
+  telefon: { group: 'ev', label: 'Telefon', title: 'Telefon faturası', cat: 'mobile', match: /telefon|gsm|(?<![\p{L}])hat(?:t[ıi])?(?![\p{L}])/u },
+  kira: { group: 'ev', label: 'Kira', title: 'Kira', cat: 'home', match: /(?<![\p{L}])kira(?![lz])/u },
+  aidat: { group: 'ev', label: 'Aidat', title: 'Aidat', cat: 'home', match: /aidat/u },
+  chatgpt: { group: 'dijital', label: 'ChatGPT', title: 'ChatGPT aboneliği', cat: 'ai', auto: true, match: /chat\s*gpt|çet\s*gpt|openai/u },
+  claude: { group: 'dijital', label: 'Claude', title: 'Claude aboneliği', cat: 'ai', auto: true, match: /claude|klod|clod/u },
+  gemini: { group: 'dijital', label: 'Gemini', title: 'Gemini aboneliği', cat: 'ai', auto: true, match: /gemini|cemini/u },
+  youtube: { group: 'dijital', label: 'YouTube', title: 'YouTube Premium', cat: 'tv', auto: true, match: /you\s*tube|yutu[pb]/u },
+  netflix: { group: 'dijital', label: 'Netflix', title: 'Netflix aboneliği', cat: 'tv', auto: true, match: /netfl[iı][xks]/u },
+  disney: { group: 'dijital', label: 'Disney+', title: 'Disney+ aboneliği', cat: 'tv', auto: true, match: /disney|dizni/u },
+  prime: { group: 'dijital', label: 'Prime Video', title: 'Amazon Prime aboneliği', cat: 'tv', auto: true, match: /amazon|(?<![\p{L}])prime(?![\p{L}])/u },
+  max: { group: 'dijital', label: 'HBO Max', title: 'HBO Max aboneliği', cat: 'tv', auto: true, match: /hbo|blu\s*tv|(?<![\p{L}])max(?![\p{L}])/u },
+  exxen: { group: 'dijital', label: 'Exxen', title: 'Exxen aboneliği', cat: 'tv', auto: true, match: /exxen|ekzen/u },
+  tod: { group: 'dijital', label: 'TOD', title: 'TOD aboneliği', cat: 'tv', auto: true, match: /(?<![\p{L}])tod(?![\p{L}])|bein/u },
+  spotify: { group: 'dijital', label: 'Spotify', title: 'Spotify Premium', cat: 'music', auto: true, match: /spot[iı]f[aiy]/u },
+  icloud: { group: 'dijital', label: 'iCloud+', title: 'iCloud+ depolama', cat: 'cloud', auto: true, match: /[iı]\s*cloud|ay\s*kla[uv]d/u },
+  apple: { group: 'dijital', label: 'Apple', title: 'Apple aboneliği', cat: 'sub', auto: true, match: /apple|app\s*store|(?<![\p{L}])epıl/u },
+  google: { group: 'dijital', label: 'Google One', title: 'Google One depolama', cat: 'cloud', auto: true, match: /google|gugıl/u },
+  microsoft: { group: 'dijital', label: 'Microsoft 365', title: 'Microsoft 365 aboneliği', cat: 'cloud', auto: true, match: /microsoft|office\s*365|one\s*drive/u },
+  adobe: { group: 'dijital', label: 'Adobe', title: 'Adobe aboneliği', cat: 'sub', auto: true, match: /adobe|photoshop|lightroom/u },
+  oyun: { group: 'dijital', label: 'Oyun', title: 'Oyun aboneliği', cat: 'game', auto: true, match: /playstation|ps\s*plus|xbox|game\s*pass|nintendo|steam|(?<![\p{L}])oyun/u },
+  abonelik: { group: 'dijital', label: 'Diğer abonelik', title: 'Abonelik', cat: 'sub', auto: true, match: /abone|premium/u },
+  kart: { group: 'odeme', label: 'Kredi kartı', title: 'Kredi kartı ödemesi', cat: 'pay', match: /kredi\s*kart|ekstre/u },
+  sigorta: { group: 'odeme', label: 'Sigorta', title: 'Sigorta', cat: 'shield', match: /sigorta|kasko|poliçe/u },
+  spor: { group: 'odeme', label: 'Spor salonu', title: 'Spor salonu', cat: 'sport', match: /spor\s*salon|(?<![\p{L}])gym|fitness/u },
+  kurs: { group: 'odeme', label: 'Okul, kurs', title: 'Kurs ödemesi', cat: 'study', match: /(?<![\p{L}])okul|kurs|dershane/u },
+  kredi: { group: 'odeme', label: 'Kredi taksiti', title: 'Kredi taksiti', cat: 'pay', match: /kredi|taksit/u },
+  diger: { group: 'odeme', label: 'Diğer', title: 'Fatura', cat: 'pay', match: /(?!)/u },
 };
 export function billTypeOf(text) {
-  const s = String(text).toLocaleLowerCase('tr');
-  return Object.keys(BILL_TYPES).find(k => BILL_TYPES[k].match.test(s)) || 'diger';
+  // Marka adları büyük harfle gelebilir: Türkçe küçültme "ICLOUD"u "ıcloud" yapar, ikisine de bakılır.
+  const forms = [String(text).toLocaleLowerCase('tr'), String(text).toLowerCase()];
+  return Object.keys(BILL_TYPES).find(k => forms.some(s => BILL_TYPES[k].match.test(s))) || 'diger';
 }
 
 const dayList = v => [...new Set((Array.isArray(v) ? v : []).map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= 3650))].sort((a, b) => a - b).slice(0, 100);
@@ -36,6 +58,15 @@ export function newBill(type = 'diger', from = 10, to = 15, auto = Boolean(BILL_
   return { type, from, to, before: from === to || auto ? [1] : [], after: auto ? [] : [3], auto };
 }
 export const paidWord = bill => (bill.auto ? 'Çekildi' : 'Ödedim');
+// Aynı türden ikinci kayıt "Telefon faturası 2" olur; kullanıcı adı "İş hattı" gibi değiştirebilir.
+export function freshBillTitle(type, items) {
+  const base = (BILL_TYPES[type] || BILL_TYPES.diger).title;
+  const taken = new Set(items.filter(i => i.bill).map(i => i.title.trim().toLocaleLowerCase('tr')));
+  if (!taken.has(base.toLocaleLowerCase('tr')) && !items.some(i => i.bill?.type === type)) return base;
+  let n = 2;
+  while (taken.has(`${base} ${n}`.toLocaleLowerCase('tr'))) n++;
+  return `${base} ${n}`;
+}
 
 export function billSpan(bill, key) {
   return { start: addMonths(key, 0, bill.from), end: addMonths(key, bill.to < bill.from ? 1 : 0, bill.to) };

@@ -4,7 +4,8 @@ iPhone'da uygulama gibi çalışan kişisel ajanda (PWA). Gününü planla, söy
 
 - **Söyle, eklensin:** "Her cuma 12'de babaannemi ara, 10 ve 15 dk önce hatırlat" yazman ya da söylemen yeter. Gün, saat, tekrar ve hatırlatma cümleden çıkarılır, kaydetmeden önce dokunup düzeltilebilir.
 - **Telegram hatırlatması:** Uygulama kapalıyken de gelir, Mi Band gibi saatlere Telegram bildirimi olarak ulaşır. Bota yazarak ya da sesli mesajla da plan eklenir.
-- **Faturalar:** Net gün ya da tarih aralığı seçilir; ödendi denene kadar hatırlatır, sonraki dönem yeniden başlar.
+- **Faturalar ve abonelikler:** Elektrikten iCloud'a, YouTube'dan kredi taksitine; aynı türden birden fazla. Net gün ya da tarih aralığı seçilir; ödendi denene kadar hatırlatır, sonraki dönem yeniden başlar.
+- **Zamanı sana bırak:** "Kedinin kumunu değiştir, bu hafta hatırlat" dersen sakin bir gün ve boş bir saat seçilir, iş ayrıca notlara yazılır.
 - **Ana ekran widget'ı:** iOS Kısayollar widget'ıyla uygulamayı açmadan sesle ekleme.
 - **Veriler telefonda:** Hesap yok. Sunucuya yalnız hatırlatma için planların kopyası gider.
 

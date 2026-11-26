@@ -1,6 +1,6 @@
 # Devir notu
 
-Güncelleme: **22 Kasım 2026**. Sürüm **5.8.1**. Canlıdaki sürüm: `GET /health`.
+Güncelleme: **26 Kasım 2026**. Sürüm **5.9.0**. Canlıdaki sürüm: `GET /health`.
 
 ## Ne değişti (4.x → 5.0)
 
@@ -21,6 +21,17 @@ Kullanıcı arayüzün sadeleşmesini, iPhone SE 2'de gerçek uygulama hissini, 
 - **Ses:** sürekli dinleme, 1,8 sn sessizlikte durur; iOS'un birikimli sonuçları tekrar yazılmaz.
 - **Telegram taslak:** serbest metin/ses önce düğmeli taslak olur (Ekle, Vazgeç, Gün, Saat, Hatırlat, Tekrar); taslak açıkken "yarın 10'da" yazmak taslağı düzeltir. Widget (`/api/quick`) doğrudan ekler.
 - **Widget:** imzalı `web/kisayol.shortcut` (imza sertifikasında kişisel bilgi yok, yalnız Apple'ın anonim kimliği). Uygulama kodu panoya kopyalayıp dosyayı açar; Kısayollar soruda kodu ister.
+
+## 5.9
+
+- **Sürpriz zaman (`parse.js`: `VAGUE`, `pickSlot`, `surpriseNote`):** cümlede `hatırlat`/`haber ver` varken gün ya da saat açık bırakılırsa zamanı uygulama seçer. Pencereler: bu hafta (içinde, boyunca, bir ara), bu/gelecek hafta sonu, bu/gelecek hafta içi, haftaya, bu ay, bu ay sonu, gelecek ay (başı, ortası, sonu), N gün/hafta içinde, birkaç gün içinde, bir ara, yakında. Gün söylenip saat söylenmezse ("haftaya çarşamba hatırlat") yalnız saat seçilir. Gün dilimi (akşam 18:30–21:30 …) ya da saat aralığı ("akşam 7 ile 9 arası") saat penceresi olur; yoksa 10:00–20:30.
+- **Seçim:** pencerede en az planı olan gün (birden çok gün varsa bugün seçilmez), o gün saatli planların 45 dk dışında 5 dakikalık bir saat, en erken şimdi + 45 dk. Aynı cümle aynı sonucu verir (başlıktan tohum), önizleme ile kayıt tutar. Vakit kalmadıysa ertesi gün. Hatırlatma vaktinde (`[0]`).
+- **Not:** sürpriz zamanlı plan ayrıca nota yazılır: `Başlık\nHatırlatma: 29 Kasım Pazar 19:05` (tam tarih, "yarın" değil). Uygulamada önizleme çipi "Gün ve saat benden · Nota da yazılır"; Telegram taslağında 🎲 satırı, eklenince "📝 Notlara da yazıldı", Geri al ikisini de siler (`u:<plan>:<not>`). Kısayol yanıtı da aynı.
+- Sürpriz değil: saat verilmiş, "1 gün önce hatırlat" gibi önceden hatırlatması olan, tekrarlı, fatura, "hatırlatma yok". `hatırlat` olmadan "bu hafta sonu" artık her hafta sonu tekrarı değil, o cumartesidir; çıplak "hafta sonu" tekrar olarak kalır.
+- **Ünlem:** `cleanTitle` cümleleri bölerken `!` ve `?` atıyordu ("Ekmek al!" → "Ekmek al"). Artık kalır; boş kalan cümlenin işareti öncekine geçer ("Ekmek al, bana hatırlat!" → "Ekmek al!"). `aramayı hatırlat` → `ara`.
+- **Faturalar:** türler üç grupta (`BILL_GROUPS`: Ev ve hat, Dijital abonelikler, Ödemeler ve diğer). Yeni: Gemini, YouTube, Netflix, Disney+, Prime Video, HBO Max, Exxen, TOD, Spotify, iCloud+, Apple, Google One, Microsoft 365, Adobe, Oyun, kredi taksiti, sigorta, spor salonu, okul/kurs. Yeni kategoriler `ai, tv, music, cloud, game, shield`. `billTypeOf` Türkçe ve İngilizce küçültmeye bakar ("ICLOUD"). Aynı türden ikinci kayıt `freshBillTitle` ile "ChatGPT aboneliği 2" olur, editörde ayırt edici ad ipucu, ızgarada sayı rozeti. Tek kelimelik başlık türün adının başıysa tam ada döner ("YouTube" → "YouTube Premium"), değilse korunur ("Kasko").
+- **Senkron 3:** 5.8.1 uygulaması (senkron 2) yeni fatura türlerini "Diğer"e çevirirdi; aynada ya da kuyrukta yeni tür varken reddedilir. Senkron 1 için eski kural sürer.
+- `npm test`: 110 test.
 
 ## 5.8.1
 

@@ -44,3 +44,12 @@ Güncellik: **22 Kasım 2026**. Son istek, eski briefteki çelişen tercihin ön
 | Çift açılış ekranı olmasın | Uygulamanın yükleme animasyonu kaldırıldı. |
 | Siyah ekranda logo olmasın | Ayarlar → Açılış ekranını yenile; veriler taşınır. |
 | Artı eksi birer birer, basılı tutunca hızlı; dk, saat, gün | Bütün artı eksi alanlarında. |
+
+## Sürpriz zaman, ünlem, abonelikler (26 Kasım)
+
+| İstek | Karşılık |
+| --- | --- |
+| "Bana bu hafta hatırlat": önce nota ekle, sakin bir gün ve sürpriz bir saat seç | Plan en az planı olan güne, boş bir saate kurulur; ayrıca nota yazılır. |
+| "Önümüzdeki ay hatırlat", "haftaya çarşamba hatırlat" (saati sen seç), "bu hafta akşam şu saatler arasında" | Ay, hafta sonu, hafta içi, bir ara; gün belliyse yalnız saat; gün dilimi ya da aralık saat penceresi olur. |
+| Notlarda ünlem kayboluyor | Başlıkta `!` ve `?` kalır. |
+| Dijital abonelikler (YouTube, Spotify, iCloud…), aynı türden birden fazla | Üç grupta 32 tür; ikinci kayıt numaralı ad ve ipucuyla. |

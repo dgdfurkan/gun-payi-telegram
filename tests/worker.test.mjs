@@ -115,16 +115,16 @@ test('Telegram serbest metni önce taslak olur, Ekle ile plana girer', async () 
   assert.match(draft.body.text, /📞 <b>Babaannemi ara<\/b>/);
   assert.match(draft.body.text, /Her Cuma/);
   assert.match(draft.body.text, /10, 15 dk önce/);
-  let sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  let sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.ok, true, 'taslak onaylanmadan plan eklenmez');
   await press(t, btn(draft, 'Ekle'));
   assert.match(lastSent(t).body.text, /✅/);
-  sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events.length, 1);
   const item = sync.events[0].item;
   assert.deepEqual(item.weekdays, [5]);
   assert.deepEqual(item.reminders, [15, 10]);
-  const second = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: sync.cursor, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } })).json();
+  const second = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: sync.cursor, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } })).json();
   assert.equal(second.ok, true);
   assert.ok(t.hubs.get('chat:42').store.alarm > Date.now());
 });
@@ -151,7 +151,7 @@ test('taslak düğmelerle ve yazarak düzeltilir', async () => {
   assert.match(fixed.body.text, /Yarın/);
   assert.match(fixed.body.text, /🕐 10:00/);
   await press(t, btn(fixed, 'Ekle'));
-  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events[0].item.time, '10:00');
   assert.equal(sync.events[0].item.repeat, 'none');
   await t.hook(message('Kitap oku'));
@@ -183,7 +183,7 @@ test('taslakta menüye girince yazılan metin o alana uygulanır', async () => {
   await t.hook(message('20 Aralık 2027'));
   assert.match(lastSent(t).body.text, /20 Aralık/);
   await press(t, btn(lastSent(t), 'Ekle'));
-  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   const it = sync.events[0].item;
   assert.equal(it.title, 'Akşam koşusu');
   assert.equal(it.date, '2027-12-20');
@@ -217,10 +217,10 @@ test('sohbet temizliği: eklenince ara mesajlar, bitince plan kartı silinir', a
   assert.ok(gone.includes(userMsg.message.message_id), 'kullanıcının mesajı silinir');
   assert.ok(gone.includes(typed.message.message_id), 'yazılan düzeltme silinir');
   assert.ok(!gone.includes(card), 'plan kartı kalır');
-  const first = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  const first = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   const item = first.events[0].item;
-  await t.call('/api/sync', { auth, body: { proto: 2, cursor: first.cursor, items: [item], prefs: {} } });
-  await t.call('/api/sync', { auth, body: { proto: 2, cursor: first.cursor, items: [{ ...item, status: 'done' }], prefs: {} } });
+  await t.call('/api/sync', { auth, body: { proto: 3, cursor: first.cursor, items: [item], prefs: {} } });
+  await t.call('/api/sync', { auth, body: { proto: 3, cursor: first.cursor, items: [{ ...item, status: 'done' }], prefs: {} } });
   assert.ok(deleted(t).includes(card), 'uygulamada tamamlanınca kart silinir');
 });
 
@@ -229,7 +229,7 @@ test('hatırlatmadaki Tamamlandı mesajları siler, eskimiş düğme takılmaz',
   const auth = await linked(t);
   const { day, minutes } = clockAt(Date.now() + 2 * 60000, 'Europe/Istanbul');
   const item = { id: 'r1', title: 'İlaç', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], status: 'pending', exceptions: {} };
-  await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+  await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
   await t.hubs.get('chat:42').alarm();
   const reminder = t.calls.filter(c => c.method === 'sendMessage').at(-1);
   await press(t, reminder.body.reply_markup.inline_keyboard[0][0].callback_data, reminder.id);
@@ -244,7 +244,7 @@ test('saatsiz metin yapılacaklara düşer, not komutu not olur', async () => {
   await t.hook(message('Ekmek al'));
   await press(t, btn(lastSent(t), 'Ekle'));
   await t.hook(message('/not Widget fikri'));
-  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   assert.equal(sync.events[0].item.date, '');
   assert.equal(sync.events[1].type, 'note');
   assert.equal(sync.events[1].note.text, 'Widget fikri');
@@ -290,7 +290,7 @@ test('alarm zamanı gelen hatırlatmayı gönderir, düğme tamamlar', async () 
   const auth = await linked(t);
   const { day, minutes } = clockAt(Date.now() + 2 * 60000, 'Europe/Istanbul');
   const item = { id: 'i1', title: 'İlaç', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [5], status: 'pending', exceptions: {} };
-  await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+  await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
   const hub = t.hubs.get('chat:42');
   await hub.alarm();
   const sent = t.calls.filter(c => c.method === 'sendMessage').at(-1);
@@ -300,7 +300,7 @@ test('alarm zamanı gelen hatırlatmayı gönderir, düğme tamamlar', async () 
   await hub.alarm();
   assert.equal(t.calls.filter(c => c.method === 'sendMessage' && /İlaç/.test(c.body.text)).length, 1, 'aynı hatırlatma iki kez gitmez');
   await press(t, done);
-  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [item], prefs: {} } })).json();
   assert.equal(sync.events.at(-1).type, 'patch');
   assert.equal(sync.events.at(-1).patch.status, 'done');
 });
@@ -332,7 +332,7 @@ test('tamamlanmayan plan tekrar hatırlatılır, sohbette tek hatırlatma kalır
   try {
     const { day, minutes } = clockAt(base - 25 * 60000, 'Europe/Istanbul');
     const item = { id: 'n1', title: 'Balıkların suyu', date: day, time: fromMin(minutes), repeat: 'none', weekdays: [], reminders: [], nag: { every: 10, times: 5 }, status: 'pending', exceptions: {} };
-    await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
+    await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [item], prefs: { timeZone: 'Europe/Istanbul' } } });
     const hub = t.hubs.get('chat:42');
     await hub.alarm();
     const nags = () => t.calls.filter(c => c.method === 'sendMessage' && /Balıkların/.test(c.body.text));
@@ -364,7 +364,7 @@ test('taslakta tekrar hatırlatma düğmeyle ve yazarak seçilir', async () => {
   await t.hook(message('yarım saat arayla 2 kez'));
   assert.match(lastSent(t).body.text, /30 dk'da bir · 2 kez/);
   await press(t, btn(lastSent(t), 'Ekle'));
-  const sync = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor: 0, items: [], prefs: {} } })).json();
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
   assert.deepEqual(sync.events[0].item.nag, { every: 30, times: 2 });
 });
 
@@ -379,7 +379,7 @@ async function world(day, time, items = []) {
   const w = { t, auth, log: [] };
   w.sync = async (change = x => x) => {
     for (let i = 0; i < 4; i++) {
-      const r = await (await t.call('/api/sync', { auth, body: { proto: 2, cursor, items: local, prefs: { timeZone: TZ } } })).json();
+      const r = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor, items: local, prefs: { timeZone: TZ } } })).json();
       assert.equal(r.error, undefined, r.error);
       if (!r.events) { cursor = r.cursor; break; }
       const s = { items: local, notes: [] };
@@ -668,4 +668,54 @@ test('sonraki satırı: ay geçişi, aynı dakika tek, en fazla 6', () => {
   assert.equal(nextLine([d('2026-11-28', '20:20'), d('2026-11-28', '20:20'), d('2026-11-29', '08:00')], tz, '2026-11-28'), '\n🔔 Sonraki: 20:20 · Yarın 08:00');
   assert.equal(nextLine(Array.from({ length: 9 }, (_, i) => d('2026-11-28', `2${Math.floor(i / 6)}:${i % 6}0`)), tz, '2026-11-28'), '\n🔔 Sonraki: 20:00 · 20:10 · 20:20 · 20:30 · 20:40 · 20:50 +3');
   assert.equal(nextLine([], tz, '2026-11-28'), '');
+});
+
+test('"bu hafta hatırlat": taslak zamanı ben seçtim der, Ekle not da düşer, Geri al ikisini siler', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  await t.hook(message('Kedinin kumunu değiştir, bana bu hafta hatırlat!'));
+  const draft = lastSent(t);
+  assert.match(draft.body.text, /<b>Kedinin kumunu değiştir!<\/b>/);
+  assert.match(draft.body.text, /🎲 Günü ve saati ben seçtim, notlara da yazacağım/);
+  assert.ok(!t.calls.some(c => c.ai), 'AI gerekmez');
+  await press(t, btn(draft, 'Ekle'));
+  const added = lastSent(t);
+  assert.match(added.body.text, /📝 Notlara da yazıldı/);
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
+  const [add, note] = sync.events;
+  assert.equal(add.type, 'add');
+  assert.match(add.item.time, /^\d\d:\d\d$/);
+  assert.deepEqual(add.item.reminders, [0]);
+  assert.equal(note.type, 'note');
+  assert.match(note.note.text, /^Kedinin kumunu değiştir!\nHatırlatma: \d+ \S+ \S+ \d\d:\d\d$/);
+  await press(t, btn(added, 'Geri al'), added.body.message_id);
+  const after = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: sync.cursor, items: [add.item], prefs: {} } })).json();
+  assert.deepEqual(after.events.map(e => [e.type, e.id]), [['remove', add.item.id], ['removeNote', note.note.id]]);
+});
+
+test('Kısayol: sürpriz zamanlı plan nota da yazılır', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  const res = await t.call('/api/quick', { auth, body: 'önümüzdeki ay kombi bakımını hatırlat', headers: { 'content-type': 'text/plain' } });
+  const body = await res.text();
+  assert.match(body, /Kombi bakımı/);
+  assert.match(body, /Notlara da yazıldı/);
+  const sync = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [], prefs: {} } })).json();
+  assert.deepEqual(sync.events.map(e => e.type), ['add', 'note']);
+});
+
+test('eski uygulama (senkron 2) yeni fatura türünü bozamaz', async () => {
+  const t = setup();
+  const auth = await linked(t);
+  const bill = cleanItem({ id: 'yt', title: 'YouTube Premium', date: '2026-12-05', repeat: 'monthly', bill: { type: 'youtube', from: 5, to: 5, before: [1], after: [], auto: true } });
+  assert.equal(bill.bill.type, 'youtube');
+  const first = await (await t.call('/api/sync', { auth, body: { proto: 3, cursor: 0, items: [bill], prefs: {} } })).json();
+  assert.equal(first.ok, true);
+  const old = await t.call('/api/sync', { auth, body: { proto: 2, cursor: first.cursor, items: [{ ...bill, bill: { ...bill.bill, type: 'diger' } }], prefs: {} } });
+  assert.match(JSON.stringify(await old.json()), /güncellendi/);
+  const plain = cleanItem({ id: 'e', title: 'Elektrik', date: '2026-12-10', repeat: 'monthly', bill: { type: 'elektrik', from: 10, to: 15, before: [], after: [3] } });
+  const t2 = setup();
+  const auth2 = await linked(t2);
+  const ok = await (await t2.call('/api/sync', { auth: auth2, body: { proto: 2, cursor: 0, items: [plain], prefs: {} } })).json();
+  assert.equal(ok.ok, true, 'eski türler eski uygulamada çalışmaya devam eder');
 });

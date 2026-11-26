@@ -208,3 +208,79 @@ test('"20\'yi 10 geçe", "9\'a 10 kala"', () => {
   assert.deepEqual(p('yarın 14:00 toplantı 10 dakika kala hatırlat').reminders, [10]);
   assert.deepEqual([p("Isınma bedeli ayın 10'uyla 15'i arası").bill.to, p("Elektriği her ayın 10'u ile 15'i arası öde").bill.type], [15, 'elektrik']);
 });
+
+// ---------- 5.9: ünlem, sürpriz zaman, yeni fatura türleri ----------
+test('ünlem ve soru işareti başlıkta kalır', () => {
+  assert.equal(p('Ekmek al!').title, 'Ekmek al!');
+  assert.equal(p('Faturayı öde! Yarın 10da').title, 'Faturayı öde!');
+  assert.equal(p('Kedi maması bitti!!!').title, 'Kedi maması bitti!!!');
+  assert.equal(p('Yarın ekmek al, bana hatırlat!').title, 'Ekmek al!');
+  assert.equal(p('Ali gelecek mi? Cuma 5te sor').title, 'Ali gelecek mi? Sor');
+  assert.equal(p('Yarın 10da toplantı var, hatırlatabilir misin?').title, 'Toplantı');
+  assert.equal(p('Not: sınav var, unutma!').title, 'Sınav var, unutma!');
+});
+
+test('"bu hafta hatırlat": en sakin günü ve plansız bir saati seçer', async () => {
+  const { pickSlot } = await import('../web/js/parse.js');
+  const r = p('Kedinin kumunu değiştir, bana bu hafta hatırlat');
+  assert.equal(r.title, 'Kedinin kumunu değiştir');
+  assert.equal(r.kind, 'event');
+  assert.deepEqual(r.doubt, []);
+  assert.deepEqual(r.reminders, [0]);
+  assert.deepEqual(r.surprise, { day: true, from: '2026-11-18', to: '2026-11-22' });
+  assert.ok(r.date >= '2026-11-19' && r.date <= '2026-11-22', 'bugün değil, haftanın kalanı: ' + r.date);
+  assert.ok(r.time >= '10:00' && r.time <= '20:30', r.time);
+  assert.deepEqual(pick(p('Kedinin kumunu değiştir, bana bu hafta hatırlat')), pick(r), 'aynı cümle aynı sonuç');
+  // Dolu günler atlanır
+  const busy = ['2026-11-19', '2026-11-20', '2026-11-21'].map((date, i) => ({ id: 'b' + i, title: 'Dolu', date, time: '', endTime: '', repeat: 'none', weekdays: [], interval: 1, status: 'pending' }));
+  assert.equal(parse('Kedinin kumunu değiştir, bana bu hafta hatırlat', { now, tz: 'Europe/Istanbul', items: busy }).date, '2026-11-22');
+  // O günün planlarına 45 dakikadan yakın saat seçilmez
+  const day = [{ id: 'm', title: 'Toplantı', date: '2026-11-19', time: '11:00', endTime: '19:00', repeat: 'none', weekdays: [], interval: 1, status: 'pending' }];
+  for (let i = 0; i < 20; i++) {
+    const s = pickSlot({ from: '2026-11-19', to: '2026-11-19', start: 600, end: 1230 }, { items: day, now, tz: 'Europe/Istanbul', seed: 'x' + i });
+    assert.ok(s.time < '10:15' || s.time > '19:45', s.time);
+  }
+  // Bugün vakit kalmadıysa ertesi gün
+  const late = Date.parse('2026-11-18T20:30:00Z'); // 23:30
+  assert.equal(parse('bugün ilacı al hatırlat', { now: late, tz: 'Europe/Istanbul' }).date, '2026-11-19');
+});
+
+test('sürpriz zaman: ay, gün, gün dilimi ve saat aralığı', () => {
+  const month = p('Bana önümüzdeki ay hatırlat: kombi bakımı');
+  assert.equal(month.title, 'Kombi bakımı');
+  assert.ok(month.date >= '2026-12-01' && month.date <= '2026-12-31', month.date);
+  const wed = p('Kedinin kumunu değiştir, haftaya çarşamba hatırlat');
+  assert.equal(wed.date, '2026-11-25');
+  assert.equal(wed.surprise.day, false);
+  const eve = p('Bu hafta akşam 7 ile 9 arası kumu değiştir hatırlat');
+  assert.equal(eve.title, 'Kumu değiştir');
+  assert.ok(eve.time >= '19:00' && eve.time <= '21:00' && !eve.endTime, eve.time);
+  const evening = p('Bu hafta akşam saatlerinde kumu değiştir hatırlat');
+  assert.equal(evening.title, 'Kumu değiştir');
+  assert.ok(evening.time >= '18:30' && evening.time <= '21:30', evening.time);
+  const fixed = p("Bu hafta 15'te faturayı yatır hatırlat");
+  assert.equal(fixed.time, '15:00');
+  assert.ok(fixed.date > '2026-11-18' && fixed.date <= '2026-11-22');
+  assert.equal(p('Bir ara annemi aramayı hatırlat').title, 'Annemi ara');
+  assert.ok(p('Gelecek ayın başında sigortayı yenile hatırlat').date <= '2026-12-07');
+  // Saati ya da önceden hatırlatması söylenmiş plan sürpriz değildir
+  assert.equal(p("Yarın 9'da spor hatırlat").surprise, undefined);
+  assert.equal(p('15 aralık doğum günü 1 gün önce hatırlat').surprise, undefined);
+  assert.equal(p('Yarın ekmek al').surprise, undefined);
+  // "bu hafta sonu" tek seferliktir; çıplak "hafta sonu" her hafta
+  assert.deepEqual(pick(p('Bu hafta sonu pikniğe gidiyoruz')), { title: 'Pikniğe gidiyoruz', date: '2026-11-21', time: '', endTime: '', repeat: 'none', weekdays: [], reminders: null });
+  assert.equal(p('Hafta sonu spor yap').repeat, 'weekly');
+  assert.equal(p('Her hafta sonu temizlik').repeat, 'weekly');
+});
+
+test('yeni fatura türleri ve aynı türden ikinci kayıt', async () => {
+  const { billTypeOf, freshBillTitle } = await import('../web/js/bills.js');
+  for (const [text, type] of [['Apple iCloud', 'icloud'], ['ICLOUD', 'icloud'], ['YouTube Premium', 'youtube'], ['Spotify Premium', 'spotify'], ['NETFLIX', 'netflix'], ['Disney+', 'disney'], ['HBO Max', 'max'], ['Amazon Prime', 'prime'], ['beIN Connect', 'tod'], ['Google One', 'google'], ['Gemini', 'gemini'], ['PlayStation Plus', 'oyun'], ['kasko', 'sigorta'], ['kredi kartı', 'kart'], ['kredi taksiti', 'kredi'], ['ikinci hat', 'telefon'], ['premium', 'abonelik']]) assert.equal(billTypeOf(text), type, text);
+  assert.equal(freshBillTitle('chatgpt', []), 'ChatGPT aboneliği');
+  assert.equal(freshBillTitle('chatgpt', [{ title: 'ChatGPT aboneliği', bill: { type: 'chatgpt' } }]), 'ChatGPT aboneliği 2');
+  assert.equal(freshBillTitle('telefon', [{ title: 'İş hattı', bill: { type: 'telefon' } }, { title: 'Telefon faturası 2', bill: { type: 'telefon' } }]), 'Telefon faturası 3');
+  assert.equal(p("YouTube her ayın 5'inde çekiliyor").title, 'YouTube Premium');
+  assert.equal(p("YouTube her ayın 5'inde çekiliyor").bill.type, 'youtube');
+  assert.equal(p("Kasko her ayın 3'ü").title, 'Kasko');
+  assert.equal(p("Netflixe her ayın 1'inde para gidiyor").title, 'Netflix aboneliği');
+});

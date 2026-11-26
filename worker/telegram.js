@@ -142,6 +142,7 @@ export function draftView(d, today, mode = 'main', { reminderDefaults = [10], al
     if (it.date && (it.time || rem.length)) lines.push(`🔔 ${esc(remindersLabel(rem, !it.time))}${it.time ? '' : ` (${allDayTime})`}`);
     if (it.date && it.nag) lines.push(`🔁 Tamamlanmazsa ${esc(nagLabel(it.nag))}`);
   }
+  if (d.surprise) lines.push(`🎲 ${d.surprise === 'day' ? 'Günü ve saati' : 'Saati'} ben seçtim, notlara da yazacağım`);
   if (d.ai) lines.push('<i>✨ AI ile anlaşıldı, kontrol et</i>');
   const hint = { main: it.bill ? 'Saati ya da “1 gün önce”yi yazabilirsin.' : 'Düzeltmek için dokun ya da “yarın 10’da” gibi yaz.', day: 'Ya da tarihi yaz: “20 Aralık”, “20 Aralık 2027”, “haftaya cuma”.', time: 'Ya da saati yaz: “17:34”.', rem: 'Ya da istediğin süreyi yaz: “30 dk”, “28 gün”, “1 ay ve 1 hafta”. Tekrar için: “10 dk içinde 5 kere”.', txt: '✏️ Yeni başlığı yazıp gönder.' }[mode];
   if (hint) lines.push('', `<i>${hint}</i>`);
